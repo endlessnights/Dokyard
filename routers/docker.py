@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import docker
 import yaml
 import logging
@@ -115,7 +117,7 @@ async def run_compose(
         try:
             ctr = client.containers.run(
                 image,
-                name=f"{user.id}_{svc_name}",
+                nname=f"{user.id}_{uuid4().hex[:8]}_{svc_name}",
                 **run_kwargs
             )
             created.append({"service": svc_name, "id": ctr.id})

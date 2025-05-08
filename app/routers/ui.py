@@ -1,6 +1,9 @@
+# app/routers/ui.py
 import os
 import platform
 import logging
+import re
+
 import yaml
 import docker
 
@@ -25,6 +28,11 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 logger = logging.getLogger("ui")
 docker_client = docker.from_env()
+
+
+def simplify_docker_error(e: docker.errors.APIError) -> str:
+    match = re.search(r'(?<=Error \(")(.*?)(?="\))', str(e))
+    return match.group(1) if match else str(e)
 
 
 async def is_user_in_group(user: User, group_name: str) -> bool:
@@ -78,12 +86,15 @@ async def run_form(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
     return templates.TemplateResponse("run_container.html", {
         "request": request,
-        "used_ports": get_used_host_ports()
+        "used_ports": get_used_host_ports(),
+        "form_data": {},
+        "error": None,
     })
 
 
-@router.post("/run")
+@router.post("/run", response_class=HTMLResponse)
 async def run_submit(
+    request: Request,
     image: str = Form(...),
     name: str = Form(...),
     mem_limit: str = Form("512m"),
@@ -95,50 +106,52 @@ async def run_submit(
 ):
     await check_access(user)
 
-    # ports
-    used = get_used_host_ports()
-    ports_map = {}
-    for p in ports.split(","):
-        p = p.strip()
-        if not p:
-            continue
-        try:
-            hp_s, cp_s = p.split(":", 1)
-            hp, cp = int(hp_s), int(cp_s)
-        except:
-            raise HTTPException(400, detail=f"Invalid port mapping: {p}")
-        if hp in used:
-            raise HTTPException(400, detail=f"Port {hp} already in use")
-        ports_map[cp] = hp
-
-    # env vars
-    env_map = {}
-    for e in envs.split(","):
-        e = e.strip()
-        if not e:
-            continue
-        if "=" not in e:
-            raise HTTPException(400, detail=f"Invalid env var: {e}")
-        k, v = e.split("=", 1)
-        env_map[k] = v
-
-    # volumes
-    volumes_map = {}
-    for v in volumes.split(","):
-        v = v.strip()
-        if not v:
-            continue
-        parts = v.split(":", 2)
-        if len(parts) < 2:
-            raise HTTPException(400, detail=f"Invalid volume spec: {v}")
-        raw_host, cont_path = parts[0], parts[1]
-        mode = parts[2] if len(parts) == 3 else "rw"
-        host_p = Path(raw_host).expanduser().resolve()
-        if not host_p.exists():
-            raise HTTPException(400, detail=f"Host path '{host_p}' not found")
-        volumes_map[host_p.as_posix()] = {"bind": cont_path, "mode": mode}
+    form_data = {
+        "image": image,
+        "name": name,
+        "mem_limit": mem_limit,
+        "cpu_quota": str(cpu_quota),
+        "ports": ports,
+        "envs": envs,
+        "volumes": volumes,
+    }
 
     try:
+        ports_map = {}
+        for p in ports.split(","):
+            p = p.strip()
+            if not p:
+                continue
+            host, cont = map(int, p.split(":"))
+            if host in get_used_host_ports():
+                raise ValueError(f"Port {host} already in use")
+            ports_map[cont] = host
+
+        env_map = {}
+        for e in envs.split(","):
+            e = e.strip()
+            if not e:
+                continue
+            if "=" not in e:
+                raise ValueError(f"Invalid env var: {e}")
+            k, v = e.split("=", 1)
+            env_map[k] = v
+
+        volumes_map = {}
+        for v in volumes.split(","):
+            v = v.strip()
+            if not v:
+                continue
+            parts = v.split(":", 2)
+            if len(parts) < 2:
+                raise ValueError(f"Invalid volume: {v}")
+            raw_host, cont_path = parts[0], parts[1]
+            mode = parts[2] if len(parts) == 3 else "rw"
+            host_path = Path(raw_host).expanduser().resolve()
+            if not host_path.exists():
+                raise ValueError(f"Path not found: {host_path}")
+            volumes_map[host_path.as_posix()] = {"bind": cont_path, "mode": mode}
+
         docker_client.containers.run(
             image,
             name=name,
@@ -150,18 +163,22 @@ async def run_submit(
             environment=env_map or None,
             volumes=volumes_map or None,
         )
-    except docker.errors.APIError as e:
-        raise HTTPException(400, detail=str(e))
 
-    return RedirectResponse("/ui", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+    except (ValueError, docker.errors.APIError) as e:
+        return templates.TemplateResponse("run_container.html", {
+            "request": request,
+            "used_ports": get_used_host_ports(),
+            "error": str(e),
+            "form_data": form_data
+        })
 
 
 @router.get("/compose", response_class=HTMLResponse)
 async def compose_form(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
-    return templates.TemplateResponse("compose.html", {
-        "request": request
-    })
+    return templates.TemplateResponse("compose.html", {"request": request})
 
 
 @router.post("/compose", response_class=HTMLResponse)
@@ -173,12 +190,50 @@ async def compose_submit(
 ):
     await check_access(user)
 
+    # Получение содержимого
+    content = ""
     if compose_file:
-        content = (await compose_file.read()).decode()
+        try:
+            content = (await compose_file.read()).decode()
+        except Exception:
+            return templates.TemplateResponse("compose.html", {
+                "request": request,
+                "error": "Failed to read uploaded file.",
+                "compose_text": ""
+            })
     else:
-        content = compose_text
+        content = compose_text.strip()
 
-    result = await api_run_compose(ComposeSpec(compose_yaml=content), user)
+    # Если ничего не передано
+    if not content:
+        return templates.TemplateResponse("compose.html", {
+            "request": request,
+            "error": "No compose file or text provided.",
+            "compose_text": ""
+        })
+
+    # Проверка YAML перед выполнением
+    try:
+        doc = yaml.safe_load(content)
+        if not isinstance(doc, dict) or "services" not in doc:
+            raise ValueError("Invalid or empty compose YAML: no 'services' section found")
+    except Exception as e:
+        return templates.TemplateResponse("compose.html", {
+            "request": request,
+            "error": f"YAML error: {e}",
+            "compose_text": content
+        })
+
+    # Запуск
+    try:
+        result = await api_run_compose(ComposeSpec(compose_yaml=content), user)
+    except HTTPException as e:
+        return templates.TemplateResponse("compose.html", {
+            "request": request,
+            "error": e.detail,
+            "compose_text": content
+        })
+
     return templates.TemplateResponse("compose_result.html", {
         "request": request,
         "containers": result["containers"]
@@ -189,10 +244,7 @@ async def compose_submit(
 @router.post("/{ctr_id}/start")
 async def ui_start(ctr_id: str, user: User = Depends(get_current_user)):
     await check_access(user)
-    try:
-        ctr = docker_client.containers.get(ctr_id)
-    except docker.errors.NotFound:
-        raise HTTPException(404, detail="Container not found")
+    ctr = docker_client.containers.get(ctr_id)
     if ctr.labels.get("owner") != str(user.id):
         raise HTTPException(403, detail="Not your container")
     ctr.start()
@@ -203,10 +255,7 @@ async def ui_start(ctr_id: str, user: User = Depends(get_current_user)):
 @router.post("/{ctr_id}/stop")
 async def ui_stop(ctr_id: str, user: User = Depends(get_current_user)):
     await check_access(user)
-    try:
-        ctr = docker_client.containers.get(ctr_id)
-    except docker.errors.NotFound:
-        raise HTTPException(404, detail="Container not found")
+    ctr = docker_client.containers.get(ctr_id)
     if ctr.labels.get("owner") != str(user.id):
         raise HTTPException(403, detail="Not your container")
     ctr.stop()
@@ -217,10 +266,7 @@ async def ui_stop(ctr_id: str, user: User = Depends(get_current_user)):
 @router.post("/{ctr_id}/remove")
 async def ui_remove(ctr_id: str, user: User = Depends(get_current_user)):
     await check_access(user)
-    try:
-        ctr = docker_client.containers.get(ctr_id)
-    except docker.errors.NotFound:
-        raise HTTPException(404, detail="Container not found")
+    ctr = docker_client.containers.get(ctr_id)
     if ctr.labels.get("owner") != str(user.id):
         raise HTTPException(403, detail="Not your container")
     ctr.remove(force=True)
@@ -230,17 +276,9 @@ async def ui_remove(ctr_id: str, user: User = Depends(get_current_user)):
 @router.get("/images", response_class=HTMLResponse)
 async def images_ui(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
-    cntrs = docker_client.containers.list(
-        all=True, filters={"label": f"owner={user.id}"}
-    )
+    cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={user.id}"})
     img_ids = {c.image.id for c in cntrs}
-    images = []
-    for img_id in img_ids:
-        try:
-            img = docker_client.images.get(img_id)
-            images.append(img)
-        except docker.errors.ImageNotFound:
-            pass
+    images = [docker_client.images.get(iid) for iid in img_ids if docker_client.images.get(iid)]
     return templates.TemplateResponse("images.html", {
         "request": request,
         "images": images
@@ -262,13 +300,8 @@ async def ui_remove_image(image_id: str, user: User = Depends(get_current_user))
 
 
 @router.get("/fs", response_class=HTMLResponse)
-async def fs_browser(
-    request: Request,
-    path: str = "",
-    user: User = Depends(get_current_user),
-):
+async def fs_browser(request: Request, path: str = "", user: User = Depends(get_current_user)):
     await check_access(user)
-
     base = get_home_base(user)
     target = (base / path).resolve()
     if not str(target).startswith(str(base)):
@@ -285,7 +318,6 @@ async def fs_browser(
         })
 
     current = Path(path).as_posix().rstrip("/")
-
     return templates.TemplateResponse("fs_browser.html", {
         "request": request,
         "entries": entries,
@@ -294,11 +326,7 @@ async def fs_browser(
 
 
 @router.post("/fs/upload")
-async def fs_upload(
-    path: str = Form(""),
-    file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
-):
+async def fs_upload(path: str = Form(""), file: UploadFile = File(...), user: User = Depends(get_current_user)):
     await check_access(user)
     base = get_home_base(user)
     dest_dir = (base / path).resolve()
@@ -311,10 +339,7 @@ async def fs_upload(
 
 
 @router.get("/fs/download")
-async def fs_download(
-    path: str,
-    user: User = Depends(get_current_user),
-):
+async def fs_download(path: str, user: User = Depends(get_current_user)):
     await check_access(user)
     base = get_home_base(user)
     target = (base / path).resolve()

@@ -6,8 +6,15 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 p-6">
-  <div class="max-w-4xl mx-auto bg-white p-6 shadow rounded">
-    <h1 class="text-2xl font-bold mb-4">Your Containers</h1>
+  <div class="max-w-4xl mx-auto bg-white p-6 shadow rounded space-y-4">
+    <h1 class="text-2xl font-bold">Your Containers</h1>
+
+    {% if error %}
+      <div class="p-3 bg-red-100 text-red-800 rounded">
+        {{ error }}
+      </div>
+    {% endif %}
+
     <table class="w-full table-auto border-collapse">
       <thead>
         <tr class="bg-gray-200">
@@ -32,18 +39,21 @@
             {% endfor %}
           </td>
           <td class="border px-2 py-1 space-x-1">
+
             {% if c.status != "running" %}
-            <form class="inline" action="/ui/{{ c.id }}/start" method="post">
+            <form class="inline" action="/ui/{{ c.id }}/start" method="post" onsubmit="return confirm('Start {{ c.name }}?')">
               <button class="px-2 py-1 bg-green-500 text-white rounded">Start</button>
             </form>
             {% else %}
-            <form class="inline" action="/ui/{{ c.id }}/stop" method="post">
+            <form class="inline" action="/ui/{{ c.id }}/stop" method="post" onsubmit="return confirm('Stop {{ c.name }}?')">
               <button class="px-2 py-1 bg-yellow-500 text-white rounded">Stop</button>
             </form>
             {% endif %}
-            <form class="inline" action="/ui/{{ c.id }}/remove" method="post">
+
+            <form class="inline" action="/ui/{{ c.id }}/remove" method="post" onsubmit="return confirm('Remove {{ c.name }}?')">
               <button class="px-2 py-1 bg-red-500 text-white rounded">Remove</button>
             </form>
+
           </td>
         </tr>
       {% else %}
@@ -52,9 +62,10 @@
       </tbody>
     </table>
 
-    <div class="mt-4">
+    <div class="flex space-x-2 pt-4">
       <a href="/ui/run" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Run New Container</a>
       <a href="/ui/images" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Images</a>
+      <a href="/ui/compose" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Compose Deploy</a>
     </div>
   </div>
 </body>
