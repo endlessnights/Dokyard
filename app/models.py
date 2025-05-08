@@ -30,3 +30,15 @@ class User(models.Model):
 
     class PydanticMeta:
         exclude = ['hashed_password']
+
+
+class ComposeStack(models.Model):
+    id = fields.IntField(pk=True)
+    stack_id = fields.CharField(max_length=100, unique=True)
+    owner = fields.ForeignKeyField("models.User", related_name="stacks")
+    compose_yaml = fields.TextField()
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Stack {self.stack_id} by {self.owner.username}"

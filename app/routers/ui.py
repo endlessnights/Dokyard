@@ -9,7 +9,7 @@ import yaml
 import docker
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import (
     APIRouter, Request,
@@ -21,7 +21,7 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 
-from app.models import User
+from app.models import User, ComposeStack
 from app.user_manager import get_current_user
 from routers.docker import run_compose as api_run_compose, ComposeSpec
 
@@ -184,36 +184,71 @@ async def compose_form(request: Request, user: User = Depends(get_current_user))
 
 @router.post("/compose", response_class=HTMLResponse)
 async def compose_submit(
-        compose_file: UploadFile = File(None),
-        compose_text: str = Form(""),
-        request: Request = None,
-        user: User = Depends(get_current_user),
+    compose_file: UploadFile = File(None),
+    compose_text: str = Form(""),
+    stack_id: Optional[str] = Form(None),
+    request: Request = None,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
-    # Считываем содержимое
-    content = ""
+    file_content = ""
     if compose_file and compose_file.filename:
-        content = (await compose_file.read()).decode()
-    elif compose_text.strip():
-        content = compose_text.strip()
+        file_content = (await compose_file.read()).decode()
+
+    content = file_content.strip() or compose_text.strip()
 
     if not content:
         return templates.TemplateResponse("compose.html", {
             "request": request,
-            "error": "No compose file or text provided."
+            "error": "No compose file or text provided.",
+            "compose_text": compose_text,
+            "stack_id": stack_id
         })
 
+    # если стек редактируется — удаляем текущие контейнеры
+    if stack_id:
+        containers = docker_client.containers.list(all=True, filters={"label": f"stack_id={stack_id}"})
+        for ctr in containers:
+            try:
+                ctr.stop()
+            except:
+                pass
+            try:
+                ctr.remove(force=True)
+            except:
+                pass
+
+        # перезаписываем YAML
+        stack = await ComposeStack.get_or_none(stack_id=stack_id, owner=user)
+        if stack:
+            stack.compose_yaml = content
+            await stack.save()
+
+    # запускаем как новый стек
     try:
-        result = await api_run_compose(ComposeSpec(compose_yaml=content), user)
+        result = await api_run_compose(ComposeSpec(compose_yaml=content), user, existing_stack_id=stack_id)
     except HTTPException as e:
         return templates.TemplateResponse("compose.html", {
             "request": request,
             "error": e.detail,
-            "compose_text": content
+            "compose_text": content,
         })
 
     return RedirectResponse("/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/stack/{stack_id}/edit", response_class=HTMLResponse)
+async def stack_edit(stack_id: str, request: Request, user: User = Depends(get_current_user)):
+    await check_access(user)
+    stack = await ComposeStack.get_or_none(stack_id=stack_id, owner=user)
+    if not stack:
+        raise HTTPException(404, "Stack not found")
+    return templates.TemplateResponse("compose.html", {
+        "request": request,
+        "compose_text": stack.compose_yaml,
+        "stack_id": stack.stack_id
+    })
 
 
 @router.post("/{ctr_id}/start")

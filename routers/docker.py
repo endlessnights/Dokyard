@@ -5,12 +5,13 @@ import yaml
 import logging
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from tortoise.transactions import in_transaction
 
-from app.models import User
+from app.models import User, ComposeStack
 from app.user_manager import get_current_user_cli
 
 logger = logging.getLogger("docker-compose")
@@ -70,21 +71,19 @@ class ComposeSpec(BaseModel):
 @router.post("/compose")
 async def run_compose(
     spec: ComposeSpec,
-    user: User = Depends(get_current_user_cli)
+    user: User = Depends(get_current_user_cli),
+    existing_stack_id: Optional[str] = None
 ):
     try:
         doc = yaml.safe_load(spec.compose_yaml)
     except Exception as e:
-        raise HTTPException(400, f"Invalid YAML: {e}")
-
-    if not doc:
-        raise HTTPException(400, "Empty compose file")
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
 
     services = doc.get("services")
     if not isinstance(services, dict):
-        raise HTTPException(400, "`services` must be a mapping")
+        raise HTTPException(status_code=400, detail="`services` must be a mapping")
 
-    stack_id = str(uuid4())
+    stack_id = existing_stack_id or uuid4().hex[:8]
     created = []
 
     for svc_name, svc_cfg in services.items():
@@ -94,54 +93,61 @@ async def run_compose(
 
         labels = {
             "owner": str(user.id),
-            "stack_id": stack_id,
-            "stack_service": svc_name
+            "stack_id": stack_id
         }
         run_kwargs = {"detach": True, "labels": labels}
 
-        # Ports
+        # Порты
         if "ports" in svc_cfg:
             ports_map = {}
             for mapping in svc_cfg["ports"]:
-                try:
-                    host_port, container_port = mapping.split(":", 1)
-                    ports_map[int(container_port)] = int(host_port)
-                except Exception:
-                    raise HTTPException(400, f"Invalid port format in '{svc_name}': {mapping}")
+                host_port, container_port = mapping.split(":", 1)
+                ports_map[int(container_port)] = int(host_port)
             run_kwargs["ports"] = ports_map
 
-        # Environment
+        # Окружение
         if "environment" in svc_cfg:
             run_kwargs["environment"] = svc_cfg["environment"]
 
-        # Volumes
+        # Томы
         if "volumes" in svc_cfg:
             volumes_map = {}
             for vol in svc_cfg["volumes"]:
                 parts = vol.split(":", 2)
                 if len(parts) < 2:
-                    raise HTTPException(400, f"Invalid volume spec for {svc_name}: '{vol}'")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid volume spec for {svc_name}: '{vol}'"
+                    )
                 raw_host, container_path = parts[0], parts[1]
                 mode = parts[2] if len(parts) == 3 else "rw"
                 host_path = Path(raw_host).expanduser().resolve()
                 if not host_path.exists():
-                    raise HTTPException(400, f"Host path '{host_path}' missing for {svc_name}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Host path '{host_path}' missing for {svc_name}"
+                    )
                 volumes_map[host_path.as_posix()] = {"bind": container_path, "mode": mode}
             run_kwargs["volumes"] = volumes_map
-
-        # Container name: userID_stackID_service
-        container_name = f"{user.id}_{stack_id[:8]}_{svc_name}"
 
         try:
             ctr = client.containers.run(
                 image,
-                name=container_name,
+                name=f"{user.id}_{stack_id}_{svc_name}",
                 **run_kwargs
             )
             created.append({"service": svc_name, "id": ctr.id})
         except docker.errors.APIError as e:
             logger.exception(f"Failed to start {svc_name}")
-            raise HTTPException(400, f"{svc_name}: {str(e).split(':', 1)[-1].strip()}")
+            raise HTTPException(status_code=400, detail=f"{svc_name}: {e}")
+
+    # Сохраняем stack только если он создаётся впервые
+    if not existing_stack_id:
+        await ComposeStack.create(
+            stack_id=stack_id,
+            owner_id=user.id,
+            compose_yaml=spec.compose_yaml
+        )
 
     return {"containers": created}
 
