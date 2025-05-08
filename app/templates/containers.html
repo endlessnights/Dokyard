@@ -1,53 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Containers</title>
+  <meta charset="UTF-8"/>
+  <title>Your Containers</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 p-6">
-  <div class="max-w-4xl mx-auto">
-    <div class="flex justify-between mb-4">
-      <h1 class="text-2xl font-bold">My Containers</h1>
-      <div class="space-x-2">
-        <a href="/ui/run" class="bg-blue-600 text-white px-4 py-2 rounded">Run New</a>
-        <a href="/ui/images" class="bg-green-600 text-white px-4 py-2 rounded">Images</a>
-      </div>
-    </div>
-    <table class="min-w-full bg-white shadow rounded">
-      <thead class="bg-gray-200">
-        <tr>
-          <th class="py-2 px-4">ID</th>
-          <th class="py-2 px-4">Name</th>
-          <th class="py-2 px-4">Status</th>
-          <th class="py-2 px-4">Actions</th>
+  <div class="max-w-4xl mx-auto bg-white p-6 shadow rounded">
+    <h1 class="text-2xl font-bold mb-4">Your Containers</h1>
+    <table class="w-full table-auto border-collapse">
+      <thead>
+        <tr class="bg-gray-200">
+          <th class="border px-2 py-1">Name</th>
+          <th class="border px-2 py-1">Image</th>
+          <th class="border px-2 py-1">Status</th>
+          <th class="border px-2 py-1">Ports</th>
+          <th class="border px-2 py-1">Actions</th>
         </tr>
       </thead>
       <tbody>
-        {% for c in containers %}
-        <tr class="border-b hover:bg-gray-50">
-          <td class="py-2 px-4">{{ c.id[:12] }}</td>
-          <td class="py-2 px-4">{{ c.name }}</td>
-          <td class="py-2 px-4">{{ c.status }}</td>
-          <td class="py-2 px-4 space-x-1">
-            {% if c.status == 'exited' %}
-            <form method="post" action="/ui/{{ c.id }}/start" class="inline">
-              <button class="bg-green-500 text-white px-2 py-1 rounded">Start</button>
+      {% for c in containers %}
+        <tr>
+          <td class="border px-2 py-1">{{ c.name }}</td>
+          <td class="border px-2 py-1">{{ c.image.tags | join(", ") }}</td>
+          <td class="border px-2 py-1">{{ c.status }}</td>
+          <td class="border px-2 py-1">
+            {% for host, mappings in c.attrs.NetworkSettings.Ports.items() %}
+              {% if mappings %}
+                {{ mappings[0].HostIp }}:{{ mappings[0].HostPort }}→{{ host }}<br/>
+              {% endif %}
+            {% endfor %}
+          </td>
+          <td class="border px-2 py-1 space-x-1">
+            {% if c.status != "running" %}
+            <form class="inline" action="/ui/{{ c.id }}/start" method="post">
+              <button class="px-2 py-1 bg-green-500 text-white rounded">Start</button>
             </form>
             {% else %}
-            <form method="post" action="/ui/{{ c.id }}/stop" class="inline">
-              <button class="bg-yellow-500 text-white px-2 py-1 rounded">Stop</button>
+            <form class="inline" action="/ui/{{ c.id }}/stop" method="post">
+              <button class="px-2 py-1 bg-yellow-500 text-white rounded">Stop</button>
             </form>
             {% endif %}
-            <form method="post" action="/ui/{{ c.id }}/remove" class="inline"
-                  onsubmit="return confirm('Remove container?')">
-              <button class="bg-red-500 text-white px-2 py-1 rounded">Remove</button>
+            <form class="inline" action="/ui/{{ c.id }}/remove" method="post">
+              <button class="px-2 py-1 bg-red-500 text-white rounded">Remove</button>
             </form>
           </td>
         </tr>
-        {% endfor %}
+      {% else %}
+        <tr><td colspan="5" class="text-center py-4">No containers found.</td></tr>
+      {% endfor %}
       </tbody>
     </table>
+
+    <div class="mt-4">
+      <a href="/ui/run" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Run New Container</a>
+      <a href="/ui/images" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Images</a>
+    </div>
   </div>
 </body>
 </html>

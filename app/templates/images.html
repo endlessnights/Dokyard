@@ -1,38 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Images</title>
+  <meta charset="UTF-8"/>
+  <title>Your Images</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 p-6">
-  <div class="max-w-4xl mx-auto">
-    <div class="flex justify-between mb-4">
-      <h1 class="text-2xl font-bold">My Images</h1>
-      <a href="/ui" class="bg-blue-600 text-white px-4 py-2 rounded">Containers</a>
-    </div>
-    <table class="min-w-full bg-white shadow rounded">
-      <thead class="bg-gray-200">
-        <tr>
-          <th class="py-2 px-4">Image ID</th>
-          <th class="py-2 px-4">Tags</th>
-          <th class="py-2 px-4">Actions</th>
+  <div class="max-w-4xl mx-auto bg-white p-6 shadow rounded">
+    <h1 class="text-2xl font-bold mb-4">Your Images</h1>
+    <table class="w-full table-auto border-collapse">
+      <thead>
+        <tr class="bg-gray-200">
+          <th class="border px-2 py-1">Repository:Tag</th>
+          <th class="border px-2 py-1">Image ID</th>
+          <th class="border px-2 py-1">Actions</th>
         </tr>
       </thead>
       <tbody>
-        {% for img in images %}
-        <tr class="border-b hover:bg-gray-50">
-          <td class="py-2 px-4">{{ img.id[:12] }}</td>
-          <td class="py-2 px-4">{{ img.tags | join(", ") }}</td>
-          <td class="py-2 px-4">
-            <form method="post" action="/ui/images/{{ img.id }}/remove" onsubmit="return confirm('Remove image?');" class="inline">
-              <button class="bg-red-500 text-white px-2 py-1 rounded">Remove</button>
+      {% for img in images %}
+        <tr>
+          <td class="border px-2 py-1">{{ img.tags | join(", ") }}</td>
+          <td class="border px-2 py-1">{{ img.id[:12] }}</td>
+          <td class="border px-2 py-1">
+            <form class="inline" action="/ui/images/{{ img.id }}/remove" method="post">
+              <button class="px-2 py-1 bg-red-500 text-white rounded">Remove Image</button>
             </form>
           </td>
         </tr>
-        {% endfor %}
+      {% else %}
+        <tr><td colspan="3" class="text-center py-4">No images found.</td></tr>
+      {% endfor %}
       </tbody>
     </table>
+    <div class="mt-4">
+      <a href="/ui" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">← Back to Containers</a>
+    </div>
   </div>
 </body>
 </html>
