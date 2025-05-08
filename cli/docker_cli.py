@@ -47,6 +47,25 @@ def run(image: str, name: str, mem: str = "512m", cpu: int = 50000):
 
 
 @app.command()
+def compose(file: str):
+    headers = {"Authorization": f"Bearer {load_token()}"}
+    yaml_text = open(file, "r", encoding="utf-8").read()
+    resp = httpx.post(
+        f"{API_URL}/containers/compose",
+        json={"compose_yaml": yaml_text},
+        headers=headers,
+        timeout=None
+    )
+    if resp.status_code >= 400:
+        typer.secho(f"Error {resp.status_code}:\n{resp.text}", fg="red")
+        raise typer.Exit(1)
+    data = resp.json()
+    typer.echo("Created containers:")
+    for c in data["containers"]:
+        typer.echo(f"  {c['service']}: {c['id'][:12]}")
+
+
+@app.command()
 def rm(ctr_id: str):
     headers = {"Authorization": f"Bearer {load_token()}"}
     resp = httpx.delete(f"{API_URL}/containers/{ctr_id}", headers=headers, follow_redirects=True)
