@@ -1,5 +1,7 @@
 # app/main.py
+from pathlib import Path
 
+import docker
 import os
 import logging
 from math import ceil
@@ -16,6 +18,7 @@ from contextlib import asynccontextmanager
 
 from app import auth, models
 from app.user_manager import get_current_user, get_current_user_cli
+from app.routers.ui import router as ui_router
 from app.config import (
     INVITE_CODE_ENABLED,
     INVITE_CODE,
@@ -24,6 +27,16 @@ from app.config import (
     DB_URL,
     EMAIL_AUTH_ENABLED, USERS_PER_PAGE,
 )
+
+docker_client = docker.from_env()
+
+
+# Вспомогательная проверка прав (можете вынести)
+async def check_access(user):
+    if not (await is_user_in_group(user, "administrators") or
+            await is_user_in_group(user, "managers")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,9 +70,15 @@ app = FastAPI(lifespan=lifespan)
 from routers.docker import router as docker_router
 
 app.include_router(
-  docker_router,
-  prefix="/containers",
-  dependencies=[Depends(get_current_user_cli)]
+    docker_router,
+    prefix="/containers",
+    dependencies=[Depends(get_current_user_cli)]
+)
+app.include_router(
+    ui_router,
+    prefix="/ui",
+    dependencies=[Depends(get_current_user)],
+    tags=["web-ui"]
 )
 
 
@@ -478,3 +497,123 @@ async def login_json(data: AuthRequest):
         expires_delta=expires
     )
     return AuthResponse(access_token=token)
+
+
+async def check_access(user):
+    if not (await is_user_in_group(user, "administrators") or
+            await is_user_in_group(user, "managers")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+# Список контейнеров + кнопки start/stop/remove
+@app.get("/containers/ui", response_class=HTMLResponse)
+async def containers_ui(request: Request, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={current_user.id}"})
+    return templates.TemplateResponse("containers.html", {
+        "request": request,
+        "containers": cntrs
+    })
+
+
+# Запустить форму new container
+@app.get("/containers/ui/run", response_class=HTMLResponse)
+async def run_form(request: Request, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    return templates.TemplateResponse("run_container.html", {"request": request})
+
+
+# Обработать запуск
+@app.post("/containers/ui/run", response_class=HTMLResponse)
+async def run_submit(
+        request: Request,
+        image: str = Form(...),
+        name: str = Form(...),
+        mem_limit: str = Form("512m"),
+        cpu_quota: int = Form(50000),
+        volumes: str = Form(""),  # строки через запятую host:cont[:mode]
+        current_user: models.User = Depends(get_current_user)
+):
+    await check_access(current_user)
+    # конвертация volumes
+    vol_list = [v.strip() for v in volumes.split(",") if v.strip()]
+    # используем ваш router.run_container под капотом:
+    ctr = docker_client.containers.run(
+        image,
+        name=name,
+        detach=True,
+        mem_limit=mem_limit,
+        cpu_quota=cpu_quota,
+        labels={"owner": str(current_user.id)},
+        volumes={Path(v.split(":", 1)[0]).resolve().as_posix(): {
+            "bind": v.split(":", 2)[1],
+            "mode": (v.split(":", 2)[2] if len(v.split(":", 2)) == 3 else "rw")
+        } for v in vol_list} or None
+    )
+    return RedirectResponse(url="/containers/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+
+# Start
+@app.post("/containers/ui/{ctr_id}/start")
+async def ui_start(ctr_id: str, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    ctr = docker_client.containers.get(ctr_id)
+    if ctr.labels.get("owner") != str(current_user.id):
+        raise HTTPException(403)
+    ctr.start()
+    return RedirectResponse(url="/containers/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+
+# Stop
+@app.post("/containers/ui/{ctr_id}/stop")
+async def ui_stop(ctr_id: str, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    ctr = docker_client.containers.get(ctr_id)
+    if ctr.labels.get("owner") != str(current_user.id):
+        raise HTTPException(403)
+    ctr.stop()
+    return RedirectResponse(url="/containers/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+
+# Remove
+@app.post("/containers/ui/{ctr_id}/remove")
+async def ui_remove(ctr_id: str, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    ctr = docker_client.containers.get(ctr_id)
+    if ctr.labels.get("owner") != str(current_user.id):
+        raise HTTPException(403)
+    ctr.remove(force=True)
+    return RedirectResponse(url="/containers/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+
+# Список образов
+@app.get("/images/ui", response_class=HTMLResponse)
+async def images_ui(request: Request, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={current_user.id}"})
+    img_ids = {c.image.id for c in cntrs}
+    images = []
+    for img_id in img_ids:
+        try:
+            img = docker_client.images.get(img_id)
+            images.append(img)
+        except docker.errors.ImageNotFound:
+            continue
+    return templates.TemplateResponse("images.html", {
+        "request": request,
+        "images": images
+    })
+
+
+# Удалить образ
+@app.post("/images/ui/{image_id}/remove")
+async def ui_remove_image(image_id: str, current_user: models.User = Depends(get_current_user)):
+    await check_access(current_user)
+    cntrs = docker_client.containers.list(
+        all=True,
+        filters={"label": f"owner={current_user.id}", "ancestor": image_id}
+    )
+    if any(c.status != "exited" for c in cntrs):
+        raise HTTPException(400, "Containers still running")
+    docker_client.images.remove(image=image_id)
+    return RedirectResponse(url="/images/ui", status_code=status.HTTP_303_SEE_OTHER)

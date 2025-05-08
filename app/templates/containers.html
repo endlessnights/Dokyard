@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Containers</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-4xl mx-auto">
+    <div class="flex justify-between mb-4">
+      <h1 class="text-2xl font-bold">My Containers</h1>
+      <div class="space-x-2">
+        <a href="/ui/run" class="bg-blue-600 text-white px-4 py-2 rounded">Run New</a>
+        <a href="/ui/images" class="bg-green-600 text-white px-4 py-2 rounded">Images</a>
+      </div>
+    </div>
+    <table class="min-w-full bg-white shadow rounded">
+      <thead class="bg-gray-200">
+        <tr>
+          <th class="py-2 px-4">ID</th>
+          <th class="py-2 px-4">Name</th>
+          <th class="py-2 px-4">Status</th>
+          <th class="py-2 px-4">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in containers %}
+        <tr class="border-b hover:bg-gray-50">
+          <td class="py-2 px-4">{{ c.id[:12] }}</td>
+          <td class="py-2 px-4">{{ c.name }}</td>
+          <td class="py-2 px-4">{{ c.status }}</td>
+          <td class="py-2 px-4 space-x-1">
+            {% if c.status == 'exited' %}
+            <form method="post" action="/ui/{{ c.id }}/start" class="inline">
+              <button class="bg-green-500 text-white px-2 py-1 rounded">Start</button>
+            </form>
+            {% else %}
+            <form method="post" action="/ui/{{ c.id }}/stop" class="inline">
+              <button class="bg-yellow-500 text-white px-2 py-1 rounded">Stop</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/ui/{{ c.id }}/remove" class="inline"
+                  onsubmit="return confirm('Remove container?')">
+              <button class="bg-red-500 text-white px-2 py-1 rounded">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

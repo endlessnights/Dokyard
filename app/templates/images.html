@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Images</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-4xl mx-auto">
+    <div class="flex justify-between mb-4">
+      <h1 class="text-2xl font-bold">My Images</h1>
+      <a href="/ui" class="bg-blue-600 text-white px-4 py-2 rounded">Containers</a>
+    </div>
+    <table class="min-w-full bg-white shadow rounded">
+      <thead class="bg-gray-200">
+        <tr>
+          <th class="py-2 px-4">Image ID</th>
+          <th class="py-2 px-4">Tags</th>
+          <th class="py-2 px-4">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for img in images %}
+        <tr class="border-b hover:bg-gray-50">
+          <td class="py-2 px-4">{{ img.id[:12] }}</td>
+          <td class="py-2 px-4">{{ img.tags | join(", ") }}</td>
+          <td class="py-2 px-4">
+            <form method="post" action="/ui/images/{{ img.id }}/remove" onsubmit="return confirm('Remove image?');" class="inline">
+              <button class="bg-red-500 text-white px-2 py-1 rounded">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

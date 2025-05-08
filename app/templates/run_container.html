@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Run Container</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-md mx-auto bg-white p-6 shadow rounded">
+    <h1 class="text-xl font-bold mb-4">Run New Container</h1>
+    <form method="post" action="/ui/run" class="space-y-4">
+      <div>
+        <label class="block mb-1">Image</label>
+        <input name="image" required class="w-full border px-2 py-1 rounded"/>
+      </div>
+      <div>
+        <label class="block mb-1">Name</label>
+        <input name="name" required class="w-full border px-2 py-1 rounded"/>
+      </div>
+      <div>
+        <label class="block mb-1">Memory Limit</label>
+        <input name="mem_limit" value="512m" class="w-full border px-2 py-1 rounded"/>
+      </div>
+      <div>
+        <label class="block mb-1">CPU Quota</label>
+        <input name="cpu_quota" type="number" value="50000" class="w-full border px-2 py-1 rounded"/>
+      </div>
+      <div>
+        <label class="block mb-1">Volumes (comma separated)</label>
+        <input name="volumes" placeholder="host:container[:mode],..."
+               class="w-full border px-2 py-1 rounded"/>
+      </div>
+      <div class="flex space-x-2">
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Run</button>
+        <a href="/ui" class="bg-gray-400 text-white px-4 py-2 rounded">Cancel</a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
