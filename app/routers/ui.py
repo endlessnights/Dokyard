@@ -190,41 +190,19 @@ async def compose_submit(
 ):
     await check_access(user)
 
-    # Получение содержимого
+    # Считываем содержимое
     content = ""
-    if compose_file:
-        try:
-            content = (await compose_file.read()).decode()
-        except Exception:
-            return templates.TemplateResponse("compose.html", {
-                "request": request,
-                "error": "Failed to read uploaded file.",
-                "compose_text": ""
-            })
-    else:
+    if compose_file and compose_file.filename:
+        content = (await compose_file.read()).decode()
+    elif compose_text.strip():
         content = compose_text.strip()
 
-    # Если ничего не передано
     if not content:
         return templates.TemplateResponse("compose.html", {
             "request": request,
-            "error": "No compose file or text provided.",
-            "compose_text": ""
+            "error": "No compose file or text provided."
         })
 
-    # Проверка YAML перед выполнением
-    try:
-        doc = yaml.safe_load(content)
-        if not isinstance(doc, dict) or "services" not in doc:
-            raise ValueError("Invalid or empty compose YAML: no 'services' section found")
-    except Exception as e:
-        return templates.TemplateResponse("compose.html", {
-            "request": request,
-            "error": f"YAML error: {e}",
-            "compose_text": content
-        })
-
-    # Запуск
     try:
         result = await api_run_compose(ComposeSpec(compose_yaml=content), user)
     except HTTPException as e:
@@ -234,13 +212,9 @@ async def compose_submit(
             "compose_text": content
         })
 
-    return templates.TemplateResponse("compose_result.html", {
-        "request": request,
-        "containers": result["containers"]
-    })
+    return RedirectResponse("/ui", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.get("/{ctr_id}/start")
 @router.post("/{ctr_id}/start")
 async def ui_start(ctr_id: str, user: User = Depends(get_current_user)):
     await check_access(user)

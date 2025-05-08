@@ -117,7 +117,7 @@ async def run_compose(
         try:
             ctr = client.containers.run(
                 image,
-                nname=f"{user.id}_{uuid4().hex[:8]}_{svc_name}",
+                name=f"{user.id}_{uuid4().hex[:8]}_{svc_name}",
                 **run_kwargs
             )
             created.append({"service": svc_name, "id": ctr.id})
