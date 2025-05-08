@@ -68,7 +68,7 @@ async def get_current_user(request: Request) -> User:
         user = await User.get(username=username).prefetch_related("groups")
         logger.info(f"Authenticated user: {user.username}")
         return user
-    except (jwt.PyJWTError, ValueError) as e:
+    except (jwt.JWTError, ValueError) as e:
         logger.error(f"Error decoding JWT token: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

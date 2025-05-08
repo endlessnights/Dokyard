@@ -1,5 +1,6 @@
 import json
 import os
+from typing import List
 
 import httpx
 import typer
@@ -39,10 +40,37 @@ def ps():
 
 
 @app.command()
-def run(image: str, name: str, mem: str = "512m", cpu: int = 50000):
+def run(
+    image: str,
+    name: str,
+    mem: str = "512m",
+    cpu: int = 50000,
+    volumes: List[str] = typer.Option(
+        None, "--volume", "-v",
+        help="Том: host_path:container_path[:mode], можно несколько"
+    ),
+):
     headers = {"Authorization": f"Bearer {load_token()}"}
-    spec = {"image": image, "name": name, "mem_limit": mem, "cpu_quota": cpu}
-    resp = httpx.post(f"{API_URL}/containers/run", json=spec, headers=headers, timeout=180, follow_redirects=True)
+    spec = {
+        "image": image,
+        "name": name,
+        "mem_limit": mem,
+        "cpu_quota": cpu,
+    }
+    if volumes:
+        spec["volumes"] = volumes
+
+    resp = httpx.post(
+        f"{API_URL}/containers/run",
+        json=spec,
+        headers=headers,
+        timeout=180,
+        follow_redirects=True
+    )
+    if resp.status_code >= 400:
+        typer.secho(f"Error {resp.status_code}:\n{resp.text}", fg="red")
+        raise typer.Exit(1)
+
     typer.echo(resp.json())
 
 
