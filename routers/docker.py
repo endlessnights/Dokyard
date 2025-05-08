@@ -77,29 +77,44 @@ async def run_compose(
     except Exception as e:
         raise HTTPException(400, f"Invalid YAML: {e}")
 
+    if not doc:
+        raise HTTPException(400, "Empty compose file")
+
     services = doc.get("services")
     if not isinstance(services, dict):
         raise HTTPException(400, "`services` must be a mapping")
 
+    stack_id = str(uuid4())
     created = []
+
     for svc_name, svc_cfg in services.items():
         image = svc_cfg.get("image")
         if not image:
             continue
 
-        labels = {"owner": str(user.id)}
+        labels = {
+            "owner": str(user.id),
+            "stack_id": stack_id,
+            "stack_service": svc_name
+        }
         run_kwargs = {"detach": True, "labels": labels}
 
+        # Ports
         if "ports" in svc_cfg:
             ports_map = {}
             for mapping in svc_cfg["ports"]:
-                host_port, container_port = mapping.split(":", 1)
-                ports_map[int(container_port)] = int(host_port)
+                try:
+                    host_port, container_port = mapping.split(":", 1)
+                    ports_map[int(container_port)] = int(host_port)
+                except Exception:
+                    raise HTTPException(400, f"Invalid port format in '{svc_name}': {mapping}")
             run_kwargs["ports"] = ports_map
 
+        # Environment
         if "environment" in svc_cfg:
             run_kwargs["environment"] = svc_cfg["environment"]
 
+        # Volumes
         if "volumes" in svc_cfg:
             volumes_map = {}
             for vol in svc_cfg["volumes"]:
@@ -114,16 +129,19 @@ async def run_compose(
                 volumes_map[host_path.as_posix()] = {"bind": container_path, "mode": mode}
             run_kwargs["volumes"] = volumes_map
 
+        # Container name: userID_stackID_service
+        container_name = f"{user.id}_{stack_id[:8]}_{svc_name}"
+
         try:
             ctr = client.containers.run(
                 image,
-                name=f"{user.id}_{uuid4().hex[:8]}_{svc_name}",
+                name=container_name,
                 **run_kwargs
             )
             created.append({"service": svc_name, "id": ctr.id})
         except docker.errors.APIError as e:
             logger.exception(f"Failed to start {svc_name}")
-            raise HTTPException(400, f"{svc_name}: {e}")
+            raise HTTPException(400, f"{svc_name}: {str(e).split(':', 1)[-1].strip()}")
 
     return {"containers": created}
 

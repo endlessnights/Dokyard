@@ -3,6 +3,7 @@ import os
 import platform
 import logging
 import re
+from collections import defaultdict
 
 import yaml
 import docker
@@ -42,8 +43,8 @@ async def is_user_in_group(user: User, group_name: str) -> bool:
 
 async def check_access(user: User):
     if not (
-        await is_user_in_group(user, "administrators")
-        or await is_user_in_group(user, "managers")
+            await is_user_in_group(user, "administrators")
+            or await is_user_in_group(user, "managers")
     ):
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -94,15 +95,15 @@ async def run_form(request: Request, user: User = Depends(get_current_user)):
 
 @router.post("/run", response_class=HTMLResponse)
 async def run_submit(
-    request: Request,
-    image: str = Form(...),
-    name: str = Form(...),
-    mem_limit: str = Form("512m"),
-    cpu_quota: int = Form(50000),
-    ports: str = Form(""),
-    envs: str = Form(""),
-    volumes: str = Form(""),
-    user: User = Depends(get_current_user),
+        request: Request,
+        image: str = Form(...),
+        name: str = Form(...),
+        mem_limit: str = Form("512m"),
+        cpu_quota: int = Form(50000),
+        ports: str = Form(""),
+        envs: str = Form(""),
+        volumes: str = Form(""),
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
@@ -183,10 +184,10 @@ async def compose_form(request: Request, user: User = Depends(get_current_user))
 
 @router.post("/compose", response_class=HTMLResponse)
 async def compose_submit(
-    compose_file: UploadFile = File(None),
-    compose_text: str = Form(""),
-    request: Request = None,
-    user: User = Depends(get_current_user),
+        compose_file: UploadFile = File(None),
+        compose_text: str = Form(""),
+        request: Request = None,
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
 

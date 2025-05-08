@@ -6,7 +6,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 p-6">
-  <div class="max-w-4xl mx-auto bg-white p-6 shadow rounded space-y-4">
+  <div class="max-w-5xl mx-auto bg-white p-6 shadow rounded space-y-6">
     <h1 class="text-2xl font-bold">Your Containers</h1>
 
     {% if error %}
@@ -15,52 +15,66 @@
       </div>
     {% endif %}
 
-    <table class="w-full table-auto border-collapse">
-      <thead>
-        <tr class="bg-gray-200">
-          <th class="border px-2 py-1">Name</th>
-          <th class="border px-2 py-1">Image</th>
-          <th class="border px-2 py-1">Status</th>
-          <th class="border px-2 py-1">Ports</th>
-          <th class="border px-2 py-1">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for c in containers %}
-        <tr>
-          <td class="border px-2 py-1">{{ c.name }}</td>
-          <td class="border px-2 py-1">{{ c.image.tags | join(", ") }}</td>
-          <td class="border px-2 py-1">{{ c.status }}</td>
-          <td class="border px-2 py-1">
-            {% for host, mappings in c.attrs.NetworkSettings.Ports.items() %}
-              {% if mappings %}
-                {{ mappings[0].HostIp }}:{{ mappings[0].HostPort }}→{{ host }}<br/>
-              {% endif %}
-            {% endfor %}
-          </td>
-          <td class="border px-2 py-1 space-x-1">
-
-            {% if c.status != "running" %}
-            <form class="inline" action="/ui/{{ c.id }}/start" method="post" onsubmit="return confirm('Start {{ c.name }}?')">
-              <button class="px-2 py-1 bg-green-500 text-white rounded">Start</button>
-            </form>
-            {% else %}
-            <form class="inline" action="/ui/{{ c.id }}/stop" method="post" onsubmit="return confirm('Stop {{ c.name }}?')">
-              <button class="px-2 py-1 bg-yellow-500 text-white rounded">Stop</button>
-            </form>
-            {% endif %}
-
-            <form class="inline" action="/ui/{{ c.id }}/remove" method="post" onsubmit="return confirm('Remove {{ c.name }}?')">
-              <button class="px-2 py-1 bg-red-500 text-white rounded">Remove</button>
-            </form>
-
-          </td>
-        </tr>
+    {% set grouped = {} %}
+    {% for c in containers %}
+      {% set stack = c.labels.get('stack_id') %}
+      {% if stack %}
+        {% set _ = grouped.setdefault(stack, []).append(c) %}
       {% else %}
-        <tr><td colspan="5" class="text-center py-4">No containers found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+        {% set _ = grouped.setdefault('', []).append(c) %}
+      {% endif %}
+    {% endfor %}
+
+    {% for stack_id, group in grouped.items() %}
+      {% if stack_id %}
+        <h2 class="text-xl font-semibold text-blue-700">Stack: {{ stack_id }}</h2>
+      {% endif %}
+
+      <table class="w-full table-auto border-collapse mb-6">
+        <thead>
+          <tr class="bg-gray-200">
+            <th class="border px-2 py-1">Name</th>
+            <th class="border px-2 py-1">Image</th>
+            <th class="border px-2 py-1">Status</th>
+            <th class="border px-2 py-1">Ports</th>
+            <th class="border px-2 py-1">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for c in group %}
+          <tr>
+            <td class="border px-2 py-1">{{ c.name }}</td>
+            <td class="border px-2 py-1">{{ c.image.tags | join(", ") }}</td>
+            <td class="border px-2 py-1">{{ c.status }}</td>
+            <td class="border px-2 py-1">
+              {% for host, mappings in c.attrs.NetworkSettings.Ports.items() %}
+                {% if mappings %}
+                  {{ mappings[0].HostIp }}:{{ mappings[0].HostPort }}→{{ host }}<br/>
+                {% endif %}
+              {% endfor %}
+            </td>
+            <td class="border px-2 py-1 space-x-1">
+              {% if c.status != "running" %}
+                <form class="inline" action="/ui/{{ c.id }}/start" method="post"
+                      onsubmit="return confirm('Start container {{ c.name }}?')">
+                  <button class="px-2 py-1 bg-green-600 text-white rounded">Start</button>
+                </form>
+              {% else %}
+                <form class="inline" action="/ui/{{ c.id }}/stop" method="post"
+                      onsubmit="return confirm('Stop container {{ c.name }}?')">
+                  <button class="px-2 py-1 bg-yellow-500 text-white rounded">Stop</button>
+                </form>
+              {% endif %}
+              <form class="inline" action="/ui/{{ c.id }}/remove" method="post"
+                    onsubmit="return confirm('Remove container {{ c.name }}?')">
+                <button class="px-2 py-1 bg-red-600 text-white rounded">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
 
     <div class="flex space-x-2 pt-4">
       <a href="/ui/run" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Run New Container</a>
