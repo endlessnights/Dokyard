@@ -4,6 +4,7 @@ import platform
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 
 import yaml
 import docker
@@ -332,27 +333,112 @@ async def ui_remove(ctr_id: str, user: User = Depends(get_current_user)):
 @router.get("/images", response_class=HTMLResponse)
 async def images_ui(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
-    cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={user.id}"})
-    img_ids = {c.image.id for c in cntrs}
-    images = [docker_client.images.get(iid) for iid in img_ids if docker_client.images.get(iid)]
+
+    # Все контейнеры пользователя
+    user_cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={user.id}"})
+    image_ids = {c.image.id for c in user_cntrs}
+    containers_by_image = {}
+    for c in user_cntrs:
+        containers_by_image.setdefault(c.image.id, []).append(c)
+
+    images = []
+    for image_id in image_ids:
+        try:
+            img = docker_client.images.get(image_id)
+        except docker.errors.ImageNotFound:
+            continue
+
+        # Получаем данные
+        short_id = image_id.split(":")[1]
+        created_raw = img.attrs["Created"]
+        created_iso = created_raw.replace("Z", "+00:00")
+        created = datetime.fromisoformat(created_iso).strftime('%Y-%m-%d %H:%M:%S UTC')
+        size_mb = round(img.attrs['Size'] / 1024 / 1024, 2)
+        tags = img.tags or ["<none>:<none>"]
+
+        statuses = [c.status for c in containers_by_image[image_id]]
+        status = "In use (running)" if any(s == "running" for s in statuses) else "In use (stopped)"
+
+        images.append({
+            "id": short_id,
+            "tags": tags,
+            "size_mb": size_mb,
+            "created_iso": created_iso,
+            "status": status,
+        })
+
     return templates.TemplateResponse("images.html", {
         "request": request,
         "images": images
     })
 
 
-@router.get("/images/{image_id}/remove")
 @router.post("/images/{image_id}/remove")
-async def ui_remove_image(image_id: str, user: User = Depends(get_current_user)):
+async def ui_remove_image(
+    image_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     await check_access(user)
-    cntrs = docker_client.containers.list(
-        all=True,
-        filters={"label": f"owner={user.id}", "ancestor": image_id}
-    )
-    if any(c.status != "exited" for c in cntrs):
-        raise HTTPException(400, detail="Containers still running")
-    docker_client.images.remove(image=image_id)
-    return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Собираем контейнеры пользователя
+    user_cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={user.id}"})
+    image_ids = {c.image.id for c in user_cntrs}
+    containers_by_image = {}
+    for c in user_cntrs:
+        containers_by_image.setdefault(c.image.id, []).append(c)
+
+    try:
+        full_image_id = None
+        # находим полное id
+        for img in docker_client.images.list():
+            if image_id in img.id:
+                full_image_id = img.id
+                break
+
+        if not full_image_id:
+            raise ValueError("Image not found")
+
+        # Проверяем, используется ли образ
+        if full_image_id in containers_by_image:
+            statuses = [c.status for c in containers_by_image[full_image_id]]
+            if any(s != "exited" for s in statuses):
+                raise ValueError("Image is used by running containers")
+
+        # Удаляем
+        docker_client.images.remove(image=full_image_id)
+
+        return RedirectResponse("/ui/images", status_code=303)
+
+    except Exception as e:
+        # Возвращаем шаблон с ошибкой и текущим списком образов
+        images = []
+        for image_id in image_ids:
+            try:
+                img = docker_client.images.get(image_id)
+                short_id = img.id.split(":")[1]
+                created_iso = img.attrs["Created"].replace("Z", "+00:00")
+                created = datetime.fromisoformat(created_iso).strftime('%Y-%m-%d %H:%M:%S UTC')
+                size_mb = round(img.attrs['Size'] / 1024 / 1024, 2)
+                tags = img.tags or ["<none>:<none>"]
+                statuses = [c.status for c in containers_by_image[image_id]]
+                status = "In use (running)" if any(s == "running" for s in statuses) else "In use (stopped)"
+
+                images.append({
+                    "id": short_id,
+                    "tags": tags,
+                    "size_mb": size_mb,
+                    "created": created,
+                    "status": status,
+                })
+            except docker.errors.ImageNotFound:
+                continue
+
+        return templates.TemplateResponse("images.html", {
+            "request": request,
+            "images": images,
+            "error": str(e)
+        })
 
 
 @router.get("/fs", response_class=HTMLResponse)
@@ -415,10 +501,10 @@ async def dockerhub_auth_form(request: Request, user: User = Depends(get_current
 
 @router.post("/dockerhub")
 async def dockerhub_auth_submit(
-    request: Request,
-    username: str = Form(...),
-    token: str = Form(...),
-    user: User = Depends(get_current_user)
+        request: Request,
+        username: str = Form(...),
+        token: str = Form(...),
+        user: User = Depends(get_current_user)
 ):
     await check_access(user)
     docker_client = docker.from_env()
