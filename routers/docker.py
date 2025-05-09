@@ -30,6 +30,16 @@ class RunSpec(BaseModel):
     )
 
 
+def parse_duration(value: str) -> int:
+    if value.endswith("s"):
+        return int(value[:-1]) * 1_000_000_000  # seconds to nanoseconds
+    if value.endswith("ms"):
+        return int(value[:-2]) * 1_000_000
+    if value.endswith("m"):
+        return int(value[:-1]) * 60 * 1_000_000_000
+    raise ValueError(f"Unsupported duration format: {value}")
+
+
 @router.post("/run")
 async def run_container(
     spec: RunSpec,
@@ -72,7 +82,8 @@ class ComposeSpec(BaseModel):
 async def run_compose(
     spec: ComposeSpec,
     user: User = Depends(get_current_user_cli),
-    existing_stack_id: Optional[str] = None
+    existing_stack_id: Optional[str] = None,
+    mode: str = "strict",  # "strict" or "relaxed"
 ):
     try:
         doc = yaml.safe_load(spec.compose_yaml)
@@ -83,8 +94,9 @@ async def run_compose(
     if not isinstance(services, dict):
         raise HTTPException(status_code=400, detail="`services` must be a mapping")
 
-    stack_id = existing_stack_id or uuid4().hex[:8]
-    created = []
+    stack_id = existing_stack_id or str(uuid4())
+    created_containers = []
+    errors = {}
 
     for svc_name, svc_cfg in services.items():
         image = svc_cfg.get("image")
@@ -93,63 +105,109 @@ async def run_compose(
 
         labels = {
             "owner": str(user.id),
-            "stack_id": stack_id
+            "stack_id": stack_id,
         }
+
         run_kwargs = {"detach": True, "labels": labels}
 
-        # Порты
+        # Ports
         if "ports" in svc_cfg:
             ports_map = {}
             for mapping in svc_cfg["ports"]:
-                host_port, container_port = mapping.split(":", 1)
-                ports_map[int(container_port)] = int(host_port)
+                try:
+                    host_port, container_port = mapping.split(":", 1)
+                    ports_map[int(container_port)] = int(host_port)
+                except Exception:
+                    errors[svc_name] = f"Invalid port mapping: {mapping}"
+                    if mode == "strict":
+                        break
+                    continue
             run_kwargs["ports"] = ports_map
 
-        # Окружение
+        # Environment
         if "environment" in svc_cfg:
             run_kwargs["environment"] = svc_cfg["environment"]
 
-        # Томы
+        # Volumes
         if "volumes" in svc_cfg:
             volumes_map = {}
             for vol in svc_cfg["volumes"]:
                 parts = vol.split(":", 2)
                 if len(parts) < 2:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid volume spec for {svc_name}: '{vol}'"
-                    )
+                    errors[svc_name] = f"Invalid volume: {vol}"
+                    if mode == "strict":
+                        break
+                    continue
                 raw_host, container_path = parts[0], parts[1]
-                mode = parts[2] if len(parts) == 3 else "rw"
+                mode_flag = parts[2] if len(parts) == 3 else "rw"
                 host_path = Path(raw_host).expanduser().resolve()
                 if not host_path.exists():
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Host path '{host_path}' missing for {svc_name}"
-                    )
-                volumes_map[host_path.as_posix()] = {"bind": container_path, "mode": mode}
+                    errors[svc_name] = f"Host path not found: {host_path}"
+                    if mode == "strict":
+                        break
+                    continue
+                volumes_map[host_path.as_posix()] = {"bind": container_path, "mode": mode_flag}
             run_kwargs["volumes"] = volumes_map
+
+        # Extra options
+        if "hostname" in svc_cfg:
+            run_kwargs["hostname"] = svc_cfg["hostname"]
+        if "restart" in svc_cfg:
+            run_kwargs["restart_policy"] = {"Name": svc_cfg["restart"]}
+        if "healthcheck" in svc_cfg:
+            raw = svc_cfg["healthcheck"]
+            hc = {"test": raw["test"]}
+
+            if "interval" in raw:
+                try:
+                    hc["interval"] = parse_duration(raw["interval"])
+                except ValueError as ve:
+                    errors[svc_name] = str(ve)
+                    if mode == "strict":
+                        break
+
+            if "timeout" in raw:
+                try:
+                    hc["timeout"] = parse_duration(raw["timeout"])
+                except ValueError as ve:
+                    errors[svc_name] = str(ve)
+                    if mode == "strict":
+                        break
+
+            if "retries" in raw:
+                hc["retries"] = int(raw["retries"])
+
+            run_kwargs["healthcheck"] = hc
 
         try:
             ctr = client.containers.run(
                 image,
-                name=f"{user.id}_{stack_id}_{svc_name}",
+                name=f"{user.id}_{stack_id[:8]}_{svc_name}",
                 **run_kwargs
             )
-            created.append({"service": svc_name, "id": ctr.id})
+            created_containers.append(ctr)
         except docker.errors.APIError as e:
-            logger.exception(f"Failed to start {svc_name}")
-            raise HTTPException(status_code=400, detail=f"{svc_name}: {e}")
+            if mode == "strict":
+                for prev_ctr in created_containers:
+                    try:
+                        prev_ctr.stop()
+                    except Exception:
+                        pass
+                    try:
+                        prev_ctr.remove(force=True)
+                    except Exception:
+                        pass
+                raise HTTPException(status_code=400, detail=f"{svc_name}: {str(e)}")
+            else:
+                errors[svc_name] = str(e)
 
-    # Сохраняем stack только если он создаётся впервые
     if not existing_stack_id:
-        await ComposeStack.create(
-            stack_id=stack_id,
-            owner_id=user.id,
-            compose_yaml=spec.compose_yaml
-        )
+        await ComposeStack.create(stack_id=stack_id, owner=user, compose_yaml=spec.compose_yaml)
 
-    return {"containers": created}
+    if mode == "relaxed" and errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    return {"containers": [{"id": c.id, "service": c.name} for c in created_containers]}
 
 
 @router.get("/")
