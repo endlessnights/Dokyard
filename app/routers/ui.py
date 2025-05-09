@@ -184,11 +184,11 @@ async def compose_form(request: Request, user: User = Depends(get_current_user))
 
 @router.post("/compose", response_class=HTMLResponse)
 async def compose_submit(
-    compose_file: UploadFile = File(None),
-    compose_text: str = Form(""),
-    stack_id: Optional[str] = Form(None),
-    request: Request = None,
-    user: User = Depends(get_current_user),
+        compose_file: UploadFile = File(None),
+        compose_text: str = Form(""),
+        stack_id: Optional[str] = Form(None),
+        request: Request = None,
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
@@ -248,6 +248,52 @@ async def stack_edit(stack_id: str, request: Request, user: User = Depends(get_c
         "request": request,
         "compose_text": stack.compose_yaml,
         "stack_id": stack.stack_id
+    })
+
+
+@router.post("/stack/{stack_id}/start")
+async def ui_stack_start(stack_id: str, user: User = Depends(get_current_user)):
+    await check_access(user)
+    containers = docker_client.containers.list(all=True,
+                                               filters={"label": f"owner={user.id}", "label": f"stack_id={stack_id}"})
+    for c in containers:
+        try:
+            c.start()
+        except:
+            continue
+    return RedirectResponse("/ui", status_code=303)
+
+
+@router.post("/stack/{stack_id}/stop")
+async def ui_stack_stop(stack_id: str, user: User = Depends(get_current_user)):
+    await check_access(user)
+    containers = docker_client.containers.list(all=True,
+                                               filters={"label": f"owner={user.id}", "label": f"stack_id={stack_id}"})
+    for c in containers:
+        try:
+            c.stop()
+        except:
+            continue
+    return RedirectResponse("/ui", status_code=303)
+
+
+@router.get("/logs/{ctr_id}", response_class=HTMLResponse)
+async def ui_container_logs(ctr_id: str, request: Request, user: User = Depends(get_current_user)):
+    await check_access(user)
+    try:
+        ctr = docker_client.containers.get(ctr_id)
+    except docker.errors.NotFound:
+        raise HTTPException(404, "Container not found")
+    if ctr.labels.get("owner") != str(user.id):
+        raise HTTPException(403, "Not your container")
+    try:
+        logs = ctr.logs(tail=1000).decode()
+    except Exception as e:
+        logs = f"Error reading logs: {e}"
+    return templates.TemplateResponse("logs.html", {
+        "request": request,
+        "container": ctr,
+        "logs": logs
     })
 
 
