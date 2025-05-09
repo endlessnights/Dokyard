@@ -1,108 +1,139 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <title>Your Containers</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+    <meta charset="UTF-8"/>
+    <title>Your Containers</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 p-6">
 <div class="max-w-5xl mx-auto bg-white p-6 shadow rounded space-y-6">
-  <h1 class="text-2xl font-bold">Your Containers</h1>
+    <h1 class="text-2xl font-bold">Your Containers</h1>
 
-  {% if error %}
+    {% if error %}
     <div class="p-3 bg-red-100 text-red-800 rounded">
-      {{ error }}
+        {{ error }}
     </div>
-  {% endif %}
+    {% endif %}
 
-  {% set grouped = {} %}
-  {% for c in containers %}
+    {% set grouped = {} %}
+    {% for item in containers %}
+    {% set c = item.object %}
     {% set stack = c.labels.get('stack_id') %}
     {% if stack %}
-      {% set _ = grouped.setdefault(stack, []).append(c) %}
+    {% set _ = grouped.setdefault(stack, []).append(item) %}
     {% else %}
-      {% set _ = grouped.setdefault('', []).append(c) %}
+    {% set _ = grouped.setdefault('', []).append(item) %}
     {% endif %}
-  {% endfor %}
+    {% endfor %}
 
-  {% for stack_id, group in grouped.items() %}
+    {% for stack_id, group in grouped.items() %}
     {% if stack_id %}
-      <div class="flex items-center space-x-3">
+    <div class="flex items-center space-x-3">
         <h2 class="text-xl font-semibold text-blue-700">
-          Stack: {{ stack_id }}
+            Stack: {{ stack_id }}
         </h2>
         <a href="/ui/stack/{{ stack_id }}/edit"
            class="text-sm text-blue-500 underline hover:text-blue-700">Edit</a>
         <form action="/ui/stack/{{ stack_id }}/start" method="post" class="inline">
-          <button class="text-sm bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
-                  onclick="return confirm('Start all containers in stack {{ stack_id }}?')">▶ Start Stack</button>
+            <button class="text-sm bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+                    onclick="return confirm('Start all containers in stack {{ stack_id }}?')">▶ Start Stack
+            </button>
         </form>
         <form action="/ui/stack/{{ stack_id }}/stop" method="post" class="inline">
-          <button class="text-sm bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
-                  onclick="return confirm('Stop all containers in stack {{ stack_id }}?')">⏹ Stop Stack</button>
+            <button class="text-sm bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+                    onclick="return confirm('Stop all containers in stack {{ stack_id }}?')">⏹ Stop Stack
+            </button>
         </form>
-      </div>
+    </div>
     {% endif %}
 
     <table class="w-full table-auto border-collapse mb-6">
-      <thead>
-      <tr class="bg-gray-200">
-        <th class="border px-2 py-1">Name</th>
-        <th class="border px-2 py-1">Image</th>
-        <th class="border px-2 py-1">Status</th>
-        <th class="border px-2 py-1">Ports</th>
-        <th class="border px-2 py-1">Actions</th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for c in group %}
-        <tr>
-          <td class="border px-2 py-1">{{ c.name }}</td>
-          <td class="border px-2 py-1">{{ c.image.tags | join(", ") }}</td>
-          <td class="border px-2 py-1">{{ c.status }}</td>
-          <td class="border px-2 py-1">
-            {% for host, mappings in c.attrs.NetworkSettings.Ports.items() %}
-              {% if mappings %}
-                {{ mappings[0].HostIp }}:{{ mappings[0].HostPort }}→{{ host }}<br/>
-              {% endif %}
-            {% endfor %}
-          </td>
-          <td class="border px-2 py-1 space-x-1">
-            {% if c.status != "running" %}
-              <form class="inline" action="/ui/{{ c.id }}/start" method="post"
-                    onsubmit="return confirm('Start container {{ c.name }}?')">
-                <button class="px-2 py-1 bg-green-600 text-white rounded">Start</button>
-              </form>
-            {% else %}
-              <form class="inline" action="/ui/{{ c.id }}/stop" method="post"
-                    onsubmit="return confirm('Stop container {{ c.name }}?')">
-                <button class="px-2 py-1 bg-yellow-500 text-white rounded">Stop</button>
-              </form>
-            {% endif %}
-            <form class="inline" action="/ui/{{ c.id }}/remove" method="post"
-                  onsubmit="return confirm('Remove container {{ c.name }}?')">
-              <button class="px-2 py-1 bg-red-600 text-white rounded">Remove</button>
-            </form>
-            <a href="/ui/logs/{{ c.id }}"
-               class="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600">
-              Logs
-            </a>
-          </td>
+        <thead>
+        <tr class="bg-gray-200">
+            <th class="border px-2 py-1">Name</th>
+            <th class="border px-2 py-1">Image</th>
+            <th class="border px-2 py-1">Status</th>
+            <th class="border px-2 py-1">Ports</th>
+            <th class="border px-2 py-1">Uptime</th>
+            <th class="border px-2 py-1">Actions</th>
         </tr>
-      {% endfor %}
-      </tbody>
+        </thead>
+        <tbody>
+        {% for item in group %}
+        {% set c = item.object %}
+        <tr>
+            <td class="border px-2 py-1">{{ c.name }}</td>
+            <td class="border px-2 py-1">{{ c.image.tags | join(", ") }}</td>
+            <td class="border px-2 py-1">{{ c.status }}</td>
+            <td class="border px-2 py-1">
+                {% for host, mappings in c.attrs.NetworkSettings.Ports.items() %}
+                {% if mappings %}
+                {{ mappings[0].HostIp }}:{{ mappings[0].HostPort }}→{{ host }}<br/>
+                {% endif %}
+                {% endfor %}
+            </td>
+            <td class="border px-2 py-1">
+                {% if item.running and item.started_at %}
+                <span class="uptime" data-started="{{ item.started_at }}"></span>
+                {% elif item.started_at %}
+                <span class="text-gray-500 text-sm">Exited</span>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            <td class="border px-2 py-1 space-x-1">
+                {% if c.status != "running" %}
+                <form class="inline" action="/ui/{{ c.id }}/start" method="post"
+                      onsubmit="return confirm('Start container {{ c.name }}?')">
+                    <button class="px-2 py-1 bg-green-600 text-white rounded">Start</button>
+                </form>
+                {% else %}
+                <form class="inline" action="/ui/{{ c.id }}/stop" method="post"
+                      onsubmit="return confirm('Stop container {{ c.name }}?')">
+                    <button class="px-2 py-1 bg-yellow-500 text-white rounded">Stop</button>
+                </form>
+                {% endif %}
+                <form class="inline" action="/ui/{{ c.id }}/remove" method="post"
+                      onsubmit="return confirm('Remove container {{ c.name }}?')">
+                    <button class="px-2 py-1 bg-red-600 text-white rounded">Remove</button>
+                </form>
+                <a href="/ui/logs/{{ c.id }}"
+                   class="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600">
+                    Logs
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
     </table>
-  {% endfor %}
+    {% endfor %}
 
-  <div class="flex space-x-2 pt-4">
-    <a href="/ui/run" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Run New Container</a>
-    <a href="/ui/images" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Images</a>
-    <a href="/ui/compose" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Compose Deploy</a>
-    <a href="/ui/dockerhub"
-   class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
-  Docker Hub Login
-</a>
-  </div>
+    <div class="flex space-x-2 pt-4">
+        <a href="/ui/run" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Run New Container</a>
+        <a href="/ui/images" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Images</a>
+        <a href="/ui/compose" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Compose Deploy</a>
+        <a href="/ui/dockerhub" class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">Docker Hub
+            Login</a>
+    </div>
 </div>
+
+<script>
+    function formatDuration(ms) {
+      const sec = Math.floor(ms / 1000) % 60;
+      const min = Math.floor(ms / (60 * 1000)) % 60;
+      const hrs = Math.floor(ms / (60 * 60 * 1000)) % 24;
+      const days = Math.floor(ms / (24 * 60 * 60 * 1000));
+      return `${days}d ${hrs}h ${min}m ${sec}s`;
+    }
+
+    document.querySelectorAll(".uptime").forEach(el => {
+      const started = el.dataset.started;
+      if (!started) return;
+      const startedTime = new Date(started);
+      const now = new Date();
+      const diff = now - startedTime;
+      el.textContent = formatDuration(diff);
+    });
+</script>
 </body>
 </html>

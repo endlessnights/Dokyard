@@ -77,9 +77,17 @@ async def containers_ui(request: Request, user: User = Depends(get_current_user)
     containers = docker_client.containers.list(
         all=True, filters={"label": f"owner={user.id}"}
     )
+    container_infos = []
+    for c in containers:
+        started_at = c.attrs["State"].get("StartedAt")
+        container_infos.append({
+            "object": c,
+            "started_at": started_at,
+            "running": c.attrs["State"].get("Running", False)
+        })
     return templates.TemplateResponse("containers.html", {
         "request": request,
-        "containers": containers
+        "containers": container_infos,
     })
 
 
