@@ -402,3 +402,34 @@ async def fs_download(path: str, user: User = Depends(get_current_user)):
     if not str(target).startswith(str(base)) or not target.is_file():
         raise HTTPException(400, detail="Invalid file")
     return FileResponse(str(target), filename=target.name)
+
+
+@router.get("/dockerhub", response_class=HTMLResponse)
+async def dockerhub_auth_form(request: Request, user: User = Depends(get_current_user)):
+    await check_access(user)
+    return templates.TemplateResponse("dockerhub_login.html", {
+        "request": request,
+        "dockerhub_user": request.session.get("dockerhub_user")
+    })
+
+
+@router.post("/dockerhub")
+async def dockerhub_auth_submit(
+    request: Request,
+    username: str = Form(...),
+    token: str = Form(...),
+    user: User = Depends(get_current_user)
+):
+    await check_access(user)
+    docker_client = docker.from_env()
+    try:
+        docker_client.login(username=username, password=token, registry="https://index.docker.io/v1/")
+    except docker.errors.APIError as e:
+        return templates.TemplateResponse("dockerhub_login.html", {
+            "request": request,
+            "error": f"Failed to authenticate: {e.explanation}",
+            "dockerhub_user": None
+        })
+
+    request.session["dockerhub_user"] = username
+    return RedirectResponse("/ui/dockerhub", status_code=303)

@@ -7,6 +7,7 @@ import logging
 from math import ceil
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Form, Body
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from datetime import timedelta
@@ -86,6 +87,9 @@ app.include_router(
 async def is_user_in_group(user: models.User, group_name: str):
     groups = await user.groups.all()
     return any(group.name == group_name for group in groups)
+
+
+app.add_middleware(SessionMiddleware, secret_key="super-secret-key")
 
 
 @app.get("/", response_class=HTMLResponse)
