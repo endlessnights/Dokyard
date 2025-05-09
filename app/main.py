@@ -31,8 +31,18 @@ from app.config import (
 
 docker_client = docker.from_env()
 
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "POSTGRES_DB")
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "POSTGRES_USER")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "POSTGRES_PASSWORD")
+PGDB_HOST = os.environ.get("PGDB_HOST", "postgres")
+PGDB_PORT = os.environ.get("PGDB_PORT", "5432")
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Password12345")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
+SessionMiddlewareSecret = os.environ.get("SessionMiddlewareSecret", "super-secret-key")
 
-# Вспомогательная проверка прав (можете вынести)
+
+# Вспомогательная проверка прав
 async def check_access(user):
     if not (await is_user_in_group(user, "administrators") or
             await is_user_in_group(user, "managers")):
@@ -68,7 +78,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-from routers.docker import router as docker_router
+from app.routers.docker import router as docker_router
 
 app.include_router(
     docker_router,
@@ -89,7 +99,7 @@ async def is_user_in_group(user: models.User, group_name: str):
     return any(group.name == group_name for group in groups)
 
 
-app.add_middleware(SessionMiddleware, secret_key="super-secret-key")
+app.add_middleware(SessionMiddleware, secret_key=SessionMiddlewareSecret)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -115,9 +125,9 @@ async def home(
 
 # Create default admin and administrators group
 async def create_default_admin_and_group():
-    admin_username = "admin"
-    admin_password = "admin"  # Change this in production
-    admin_email = "admin@example.com"  # Set a default email
+    admin_username = ADMIN_USERNAME
+    admin_password = ADMIN_PASSWORD
+    admin_email = ADMIN_EMAIL
 
     # Create default admin user
     try:

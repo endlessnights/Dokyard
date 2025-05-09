@@ -1,16 +1,13 @@
 # app/routers/ui.py
-import os
 import platform
 import logging
 import re
-from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 
-import yaml
 import docker
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import (
     APIRouter, Request,
@@ -24,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.models import User, ComposeStack
 from app.user_manager import get_current_user
-from routers.docker import run_compose as api_run_compose, ComposeSpec
+from app.routers.docker import run_compose as api_run_compose, ComposeSpec
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
