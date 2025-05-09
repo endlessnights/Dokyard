@@ -71,6 +71,8 @@ def get_used_host_ports() -> set:
 @router.get("/", response_class=HTMLResponse)
 async def containers_ui(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
+    error = request.session.pop("error", None)
+
     containers = docker_client.containers.list(
         all=True, filters={"label": f"owner={user.id}"}
     )
@@ -85,6 +87,7 @@ async def containers_ui(request: Request, user: User = Depends(get_current_user)
     return templates.TemplateResponse("containers.html", {
         "request": request,
         "containers": container_infos,
+        "error": error
     })
 
 
@@ -304,12 +307,19 @@ async def ui_container_logs(ctr_id: str, request: Request, user: User = Depends(
 
 
 @router.post("/{ctr_id}/start")
-async def ui_start(ctr_id: str, user: User = Depends(get_current_user)):
+async def ui_start(
+    ctr_id: str,
+    request: Request,
+    user: User = Depends(get_current_user)
+):
     await check_access(user)
-    ctr = docker_client.containers.get(ctr_id)
-    if ctr.labels.get("owner") != str(user.id):
-        raise HTTPException(403, detail="Not your container")
-    ctr.start()
+    try:
+        ctr = docker_client.containers.get(ctr_id)
+        if ctr.labels.get("owner") != str(user.id):
+            raise HTTPException(403, detail="Not your container")
+        ctr.start()
+    except Exception as e:
+        request.session["error"] = str(e)
     return RedirectResponse("/ui", status_code=status.HTTP_303_SEE_OTHER)
 
 
