@@ -26,7 +26,7 @@ class RunSpec(BaseModel):
     cpu_quota: int = 50000
     volumes: List[str] = Field(
         default_factory=list,
-        description="host_path:container_path[:mode], можно несколько"
+        description="host_path:container_path[:mode], можно несколько",
     )
 
 
@@ -41,10 +41,7 @@ def parse_duration(value: str) -> int:
 
 
 @router.post("/run")
-async def run_container(
-    spec: RunSpec,
-    user: User = Depends(get_current_user_cli)
-):
+async def run_container(spec: RunSpec, user: User = Depends(get_current_user_cli)):
     labels = {"owner": str(user.id)}
     volumes_map = {}
     for vol in spec.volumes:
@@ -66,7 +63,7 @@ async def run_container(
             mem_limit=spec.mem_limit,
             cpu_quota=spec.cpu_quota,
             labels=labels,
-            volumes=volumes_map or None
+            volumes=volumes_map or None,
         )
     except docker.errors.APIError as e:
         raise HTTPException(400, str(e))
@@ -146,7 +143,10 @@ async def run_compose(
                     if mode == "strict":
                         break
                     continue
-                volumes_map[host_path.as_posix()] = {"bind": container_path, "mode": mode_flag}
+                volumes_map[host_path.as_posix()] = {
+                    "bind": container_path,
+                    "mode": mode_flag,
+                }
             run_kwargs["volumes"] = volumes_map
 
         # Extra options
@@ -181,9 +181,7 @@ async def run_compose(
 
         try:
             ctr = client.containers.run(
-                image,
-                name=f"{user.id}_{stack_id[:8]}_{svc_name}",
-                **run_kwargs
+                image, name=f"{user.id}_{stack_id[:8]}_{svc_name}", **run_kwargs
             )
             created_containers.append(ctr)
         except docker.errors.APIError as e:
@@ -202,7 +200,9 @@ async def run_compose(
                 errors[svc_name] = str(e)
 
     if not existing_stack_id:
-        await ComposeStack.create(stack_id=stack_id, owner=user, compose_yaml=spec.compose_yaml)
+        await ComposeStack.create(
+            stack_id=stack_id, owner=user, compose_yaml=spec.compose_yaml
+        )
 
     if mode == "relaxed" and errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
@@ -217,10 +217,7 @@ async def list_containers(user: User = Depends(get_current_user_cli)):
 
 
 @router.post("/{ctr_id}/start")
-async def start_container(
-    ctr_id: str,
-    user: User = Depends(get_current_user_cli)
-):
+async def start_container(ctr_id: str, user: User = Depends(get_current_user_cli)):
     try:
         ctr = client.containers.get(ctr_id)
     except docker.errors.NotFound:
@@ -235,10 +232,7 @@ async def start_container(
 
 
 @router.post("/{ctr_id}/stop")
-async def stop_container(
-    ctr_id: str,
-    user: User = Depends(get_current_user_cli)
-):
+async def stop_container(ctr_id: str, user: User = Depends(get_current_user_cli)):
     try:
         ctr = client.containers.get(ctr_id)
     except docker.errors.NotFound:
@@ -253,10 +247,7 @@ async def stop_container(
 
 
 @router.delete("/{ctr_id}")
-async def remove_container(
-    ctr_id: str,
-    user: User = Depends(get_current_user_cli)
-):
+async def remove_container(ctr_id: str, user: User = Depends(get_current_user_cli)):
     try:
         ctr = client.containers.get(ctr_id)
     except docker.errors.NotFound:
@@ -283,13 +274,9 @@ async def list_images(user: User = Depends(get_current_user_cli)):
 
 
 @router.delete("/images/{image_id}")
-async def remove_image(
-    image_id: str,
-    user: User = Depends(get_current_user_cli)
-):
+async def remove_image(image_id: str, user: User = Depends(get_current_user_cli)):
     cntrs = client.containers.list(
-        all=True,
-        filters={"label": f"owner={user.id}", "ancestor": image_id}
+        all=True, filters={"label": f"owner={user.id}", "ancestor": image_id}
     )
     running = [c.id for c in cntrs if c.status != "exited"]
     if running:

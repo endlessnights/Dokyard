@@ -42,3 +42,19 @@ class ComposeStack(models.Model):
 
     def __str__(self):
         return f"Stack {self.stack_id} by {self.owner.username}"
+
+
+class UserDatabase(models.Model):
+    id = fields.IntField(pk=True)
+    name = fields.CharField(max_length=100)
+    owner = fields.ForeignKeyField("models.User", related_name="databases")
+    db_user = fields.CharField(max_length=100)
+    db_password_encrypted = fields.TextField()
+    salt_phrase = fields.CharField(max_length=100)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("owner", "name")
+
+    def __str__(self):
+        return f"{self.name} ({self.owner.username})"

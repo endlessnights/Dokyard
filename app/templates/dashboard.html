@@ -10,17 +10,17 @@
 <!-- Header Menu -->
 <nav class="uk-navbar-container" uk-navbar>
     <div class="uk-navbar-left" style="padding:0 0 0 30px">
-        <a href="/admin/dashboard" class="uk-navbar-item uk-logo">Admin Dashboard</a>
+        <a href="/admin" class="uk-navbar-item uk-logo">Admin Dashboard</a>
     </div>
     <div class="uk-navbar-right">
         <ul class="uk-navbar-nav">
             <li>
-                <a href="/admin/dashboard">{{ user.full_name or user.username }}</a>
+                <a href="/admin">{{ user.full_name or user.username }}</a>
             </li>
             <li>
-                <form action="/logout" method="post" style="display: inline;">
+                <a href="/logout">
                     <button type="submit" class="uk-button uk-button-link">Logout</button>
-                </form>
+                </a>
             </li>
         </ul>
     </div>
@@ -121,7 +121,7 @@
     <!-- Pagination Controls -->
     <ul class="uk-pagination uk-flex-center uk-margin">
         {% if page > 1 %}
-        <li><a href="/admin/dashboard?page={{ page - 1 }}"><span uk-pagination-previous></span></a></li>
+        <li><a href="/admin?page={{ page - 1 }}"><span uk-pagination-previous></span></a></li>
         {% else %}
         <li class="uk-disabled"><span uk-pagination-previous></span></li>
         {% endif %}
@@ -130,12 +130,12 @@
         {% if p == page %}
         <li class="uk-active"><span>{{ p }}</span></li>
         {% else %}
-        <li><a href="/admin/dashboard?page={{ p }}">{{ p }}</a></li>
+        <li><a href="/admin?page={{ p }}">{{ p }}</a></li>
         {% endif %}
         {% endfor %}
 
         {% if page < total_pages %}
-        <li><a href="/admin/dashboard?page={{ page + 1 }}"><span uk-pagination-next></span></a></li>
+        <li><a href="/admin?page={{ page + 1 }}"><span uk-pagination-next></span></a></li>
         {% else %}
         <li class="uk-disabled"><span uk-pagination-next></span></li>
         {% endif %}

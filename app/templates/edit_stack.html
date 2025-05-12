@@ -15,13 +15,13 @@
       </div>
     {% endif %}
 
-    <form action="/ui/stacks/{{ stack_id }}/redeploy" method="post">
+    <form action="/stacks/stacks/{{ stack_id }}/redeploy" method="post">
       <textarea name="compose_text" rows="18"
                 class="w-full border font-mono text-sm px-2 py-1 rounded"
                 placeholder="docker-compose content...">{{ compose_text }}</textarea>
 
       <div class="flex justify-between items-center mt-4">
-        <a href="/ui" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">Cancel</a>
+        <a href="/stacks" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">Cancel</a>
         <button type="submit"
                 class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
                 onclick="return confirm('Are you sure you want to redeploy this stack? This will recreate all containers.')">

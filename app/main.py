@@ -19,23 +19,27 @@ from contextlib import asynccontextmanager
 
 from app import auth, models
 from app.user_manager import get_current_user, get_current_user_cli
-from app.routers.ui import router as ui_router
+from app.routers.stacks import router as stacks_router
+from app.routers.docker import router as docker_router
 from app.config import (
     INVITE_CODE_ENABLED,
     INVITE_CODE,
     REGISTRATION_ENABLED,
     ACCESS_TOKEN_EXPIRE_MINUTES,
     DB_URL,
-    EMAIL_AUTH_ENABLED, USERS_PER_PAGE,
+    EMAIL_AUTH_ENABLED,
+    USERS_PER_PAGE,
 )
 
 docker_client = docker.from_env()
 
-POSTGRES_DB = os.environ.get("POSTGRES_DB", "POSTGRES_DB")
-POSTGRES_USER = os.environ.get("POSTGRES_USER", "POSTGRES_USER")
-POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "POSTGRES_PASSWORD")
-PGDB_HOST = os.environ.get("PGDB_HOST", "postgres")
-PGDB_PORT = os.environ.get("PGDB_PORT", "5432")
+POSTGRES_MAIN_DB = os.environ.get("POSTGRES_MAIN_DB", "POSTGRES_MAIN_DB")
+POSTGRES_MAIN_USER = os.environ.get("POSTGRES_MAIN_USER", "POSTGRES_MAIN_USER")
+POSTGRES_MAIN_PASSWORD = os.environ.get(
+    "POSTGRES_MAIN_PASSWORD", "POSTGRES_MAIN_PASSWORD"
+)
+PGDB_MAIN_HOST = os.environ.get("PGDB_MAIN_HOST", "pgdb_main")
+PGDB_MAIN_PORT = os.environ.get("PGDB_MAIN_PORT", "5432")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Password12345")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
@@ -44,8 +48,10 @@ SessionMiddlewareSecret = os.environ.get("SessionMiddlewareSecret", "super-secre
 
 # Вспомогательная проверка прав
 async def check_access(user):
-    if not (await is_user_in_group(user, "administrators") or
-            await is_user_in_group(user, "managers")):
+    if not (
+        await is_user_in_group(user, "administrators")
+        or await is_user_in_group(user, "users")
+    ):
         raise HTTPException(status_code=403, detail="Permission denied")
 
 
@@ -56,16 +62,28 @@ logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="app/templates")
 
 
+async def init_tortoise():
+    await Tortoise.init(
+        db_url=f"asyncpg://{POSTGRES_MAIN_USER}:{POSTGRES_MAIN_PASSWORD}@{PGDB_MAIN_HOST}:{PGDB_MAIN_PORT}/{POSTGRES_MAIN_DB}",
+        modules={"models": ["app.models"]},
+    )
+    await Tortoise.generate_schemas()
+
+
+# async def init_tortoise():
+#     await Tortoise.init(
+#         db_url="sqlite://db.sqlite3",
+#         modules={"models": ["app.models"]},
+#     )
+#     conn = Tortoise.get_connection("default")
+#     await conn.execute_query("PRAGMA journal_mode=DELETE;")
+#     await Tortoise.generate_schemas()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize Tortoise ORM
-    await Tortoise.init(
-        db_url=DB_URL,
-        modules={"models": ["app.models"]}
-    )
-    conn = Tortoise.get_connection("default")
-    await conn.execute_query("PRAGMA journal_mode=DELETE;")
-    await Tortoise.generate_schemas()
+    await init_tortoise()
 
     # Create default admin and administrators group
     await create_default_admin_and_group()
@@ -78,18 +96,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-from app.routers.docker import router as docker_router
-
 app.include_router(
-    docker_router,
-    prefix="/containers",
-    dependencies=[Depends(get_current_user_cli)]
+    docker_router, prefix="/containers", dependencies=[Depends(get_current_user_cli)]
 )
 app.include_router(
-    ui_router,
-    prefix="/ui",
+    stacks_router,
+    prefix="/stacks",
     dependencies=[Depends(get_current_user)],
-    tags=["web-ui"]
+    tags=["web-ui"],
 )
 
 
@@ -103,24 +117,29 @@ app.add_middleware(SessionMiddleware, secret_key=SessionMiddlewareSecret)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def home(
-        request: Request,
-        current_user: models.User = Depends(get_current_user)
-):
-    # Check if the user is in the "administrators" group
-    is_admin = await is_user_in_group(current_user, "administrators")
-    is_manager = await is_user_in_group(current_user, "managers")
+async def home(request: Request):
+    user = None
+    user_group = "Guest"
 
-    user_group = "administrators" if is_admin else "managers" if is_manager else "Not authorized"
+    try:
+        user = await get_current_user(request)
+        is_admin = await is_user_in_group(user, "administrators")
+        is_manager = await is_user_in_group(user, "managers")
 
-    if not (is_admin or is_manager):
-        raise HTTPException(status_code=403, detail=f"Permission denied {user_group}")
+        if is_admin:
+            user_group = "administrators"
+        elif is_manager:
+            user_group = "managers"
+        else:
+            user_group = "user"
+    except Exception:
+        # Неавторизован или кука отсутствует
+        pass
 
-    # Return the static content if authorized
-    return templates.TemplateResponse("home.html", {
-        "request": request,
-        "user_group": user_group
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "user_group": user_group, "user": user}
+    )
 
 
 # Create default admin and administrators group
@@ -139,7 +158,7 @@ async def create_default_admin_and_group():
             username=admin_username,
             email=admin_email,
             hashed_password=hashed_password,
-            full_name="Administrator"
+            full_name="Administrator",
         )
         logger.info("Default admin user created.")
 
@@ -164,39 +183,55 @@ async def authenticate_user(identifier: str, password: str):
         else:
             user = await models.User.get(username=identifier)
     except DoesNotExist:
-        logger.warning(f"Authentication failed for identifier: {identifier} (User does not exist)")
+        logger.warning(
+            f"Authentication failed for identifier: {identifier} (User does not exist)"
+        )
         return None
     if not auth.verify_password(password, user.hashed_password):
-        logger.warning(f"Authentication failed for identifier: {identifier} (Incorrect password)")
+        logger.warning(
+            f"Authentication failed for identifier: {identifier} (Incorrect password)"
+        )
         return None
     logger.info(f"User authenticated successfully: {user.username}")
     return user
 
 
 # Login page
-@app.get("/admin", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 
 # Handle login form submission
-@app.post("/admin", response_class=HTMLResponse)
-async def login(request: Request, identifier: str = Form(...), password: str = Form(...)):
+@app.post("/login", response_class=HTMLResponse)
+async def login(
+    request: Request, identifier: str = Form(...), password: str = Form(...)
+):
     user = await authenticate_user(identifier, password)
     if not user:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+        return templates.TemplateResponse(
+            "login.html", {"request": request, "error": "Invalid credentials"}
+        )
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     logger.info(f"Creating access token for user: {user.username}")
-    response = RedirectResponse(url="/admin/dashboard", status_code=status.HTTP_302_FOUND)
+
+    if await is_user_in_group(user, "administrators"):
+        redirect_url = "/admin/"
+    elif await is_user_in_group(user, "users"):
+        redirect_url = "/stacks/"
+    else:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(
         key="access_token",
         value=f"Bearer {access_token}",  # Include "Bearer " prefix
         httponly=True,
         secure=False,  # Set to True in production
-        samesite="lax"
+        samesite="lax",
     )
     logger.info("Access token set in cookie")
     return response
@@ -209,19 +244,20 @@ async def register_form(request: Request):
         logger.warning("Registration is disabled")
         raise HTTPException(status_code=404, detail="Registration is disabled")
     return templates.TemplateResponse(
-        "register.html", {"request": request, "invite_code_enabled": INVITE_CODE_ENABLED}
+        "register.html",
+        {"request": request, "invite_code_enabled": INVITE_CODE_ENABLED},
     )
 
 
 # Handle registration form submission
 @app.post("/register", response_class=HTMLResponse)
 async def register(
-        request: Request,
-        username: str = Form(...),
-        email: str = Form(None),
-        password: str = Form(...),
-        full_name: str = Form(None),
-        invite_code: str = Form(None),
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(None),
+    password: str = Form(...),
+    full_name: str = Form(None),
+    invite_code: str = Form(None),
 ):
     if not REGISTRATION_ENABLED:
         logger.warning("Registration is disabled")
@@ -230,14 +266,22 @@ async def register(
         logger.warning("Invalid invite code provided during registration")
         return templates.TemplateResponse(
             "register.html",
-            {"request": request, "error": "Invalid invite code", "invite_code_enabled": True},
+            {
+                "request": request,
+                "error": "Invalid invite code",
+                "invite_code_enabled": True,
+            },
         )
     try:
         existing_user = await models.User.get(username=username)
         logger.warning(f"Registration attempt with existing username: {username}")
         return templates.TemplateResponse(
             "register.html",
-            {"request": request, "error": "Username already taken", "invite_code_enabled": INVITE_CODE_ENABLED},
+            {
+                "request": request,
+                "error": "Username already taken",
+                "invite_code_enabled": INVITE_CODE_ENABLED,
+            },
         )
     except DoesNotExist:
         hashed_password = auth.get_password_hash(password)
@@ -245,11 +289,12 @@ async def register(
             username=username,
             email=email,
             hashed_password=hashed_password,
-            full_name=full_name
+            full_name=full_name,
         )
         logger.info(f"New user registered: {username}")
         return templates.TemplateResponse(
-            "login.html", {"request": request, "info": "Registration successful, please log in"}
+            "login.html",
+            {"request": request, "info": "Registration successful, please log in"},
         )
 
 
@@ -260,61 +305,61 @@ async def is_administrator(user: models.User, group_name):
 
 
 # Admin dashboard
-@app.get("/admin/dashboard", response_class=HTMLResponse)
+@app.get("/admin/", response_class=HTMLResponse)
 async def admin_dashboard(
-        request: Request,
-        page: int = 1,
-        current_user: models.User = Depends(get_current_user)):
+    request: Request,
+    page: int = 1,
+    current_user: models.User = Depends(get_current_user),
+):
     logger.info(f"Fetching users for admin: {current_user.username} on page {page}")
 
-    # Check if current_user is in "administrators" group
-    is_admin = await is_administrator(current_user, "administrators")
+    if not await is_user_in_group(current_user, "administrators"):
+        return RedirectResponse(url="/stacks/", status_code=status.HTTP_303_SEE_OTHER)
 
-    # Total number of users
+    is_admin = True
+
     total_users = await models.User.all().count()
-
-    # Calculate total pages
     total_pages = ceil(total_users / USERS_PER_PAGE)
 
-    # Fetch users for the current page
-    users = await models.User.all().prefetch_related("groups").order_by("username").offset(
-        (page - 1) * USERS_PER_PAGE).limit(USERS_PER_PAGE)
+    users = (
+        await models.User.all()
+        .prefetch_related("groups")
+        .order_by("username")
+        .offset((page - 1) * USERS_PER_PAGE)
+        .limit(USERS_PER_PAGE)
+    )
 
-    # Fetch all groups
     groups = await models.Group.all().prefetch_related("users")
-
-    # Count of users in each group
     group_user_counts = {group.name: len(await group.users.all()) for group in groups}
-
-    # Count of users in "administrators" group
     admin_group_count = group_user_counts.get("administrators", 0)
-
-    # Get the customizable dashboard text from envs
     DASHBOARD_TEXT = os.getenv("DASHBOARD_TEXT", "This is the admin dashboard.")
 
-    # Pass data to template
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "user": current_user,
-        "users": users,
-        "groups": groups,
-        "is_admin": is_admin,
-        "total_users": total_users,
-        "admin_group_count": admin_group_count,
-        "group_user_counts": group_user_counts,
-        "page": page,
-        "total_pages": total_pages,
-        "users_per_page": USERS_PER_PAGE,
-        "dashboard_text": DASHBOARD_TEXT,
-    })
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "user": current_user,
+            "users": users,
+            "groups": groups,
+            "is_admin": is_admin,
+            "total_users": total_users,
+            "admin_group_count": admin_group_count,
+            "group_user_counts": group_user_counts,
+            "page": page,
+            "total_pages": total_pages,
+            "users_per_page": USERS_PER_PAGE,
+            "dashboard_text": DASHBOARD_TEXT,
+        },
+    )
 
 
 # Edit user's full name
 @app.post("/admin/edit_user")
 async def edit_user(
-        username: str = Form(...),
-        full_name: str = Form(...),
-        current_user: models.User = Depends(get_current_user)):
+    username: str = Form(...),
+    full_name: str = Form(...),
+    current_user: models.User = Depends(get_current_user),
+):
     # Only administrators can edit users
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -323,7 +368,7 @@ async def edit_user(
         user.full_name = full_name
         await user.save()
         logger.info(f"User {username}'s full name updated to: {full_name}")
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
+        return RedirectResponse(url="/admin/", status_code=303)
     except DoesNotExist:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -331,9 +376,10 @@ async def edit_user(
 # Add user to a group
 @app.post("/admin/add_user_to_group")
 async def add_user_to_group(
-        username: str = Form(...),
-        group_name: str = Form(...),
-        current_user: models.User = Depends(get_current_user)):
+    username: str = Form(...),
+    group_name: str = Form(...),
+    current_user: models.User = Depends(get_current_user),
+):
     # Only administrators can add users to groups
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -342,7 +388,7 @@ async def add_user_to_group(
         group = await models.Group.get(name=group_name)
         await user.groups.add(group)
         logger.info(f"User {username} added to group {group_name}")
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
+        return RedirectResponse(url="/admin/", status_code=303)
     except DoesNotExist:
         raise HTTPException(status_code=404, detail="User or group not found")
 
@@ -350,15 +396,17 @@ async def add_user_to_group(
 # Remove user from a group
 @app.post("/admin/remove_user_from_group")
 async def remove_user_from_group(
-        data: dict = Body(...),
-        current_user: models.User = Depends(get_current_user)):
+    data: dict = Body(...), current_user: models.User = Depends(get_current_user)
+):
     # Only administrators can remove users from groups
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
     username = data.get("username")
     group_name = data.get("group_name")
     if not username or not group_name:
-        return JSONResponse(content={"success": False, "error": "Username and group_name are required"})
+        return JSONResponse(
+            content={"success": False, "error": "Username and group_name are required"}
+        )
     try:
         user = await models.User.get(username=username)
         group = await models.Group.get(name=group_name)
@@ -366,27 +414,34 @@ async def remove_user_from_group(
         logger.info(f"User {username} removed from group {group_name}")
         return JSONResponse(content={"success": True})
     except DoesNotExist:
-        return JSONResponse(content={"success": False, "error": "User or group not found"})
+        return JSONResponse(
+            content={"success": False, "error": "User or group not found"}
+        )
 
 
 # Create a new group
 @app.post("/admin/create_group")
-async def create_group(group_name: str = Form(...), current_user: models.User = Depends(get_current_user)):
+async def create_group(
+    group_name: str = Form(...), current_user: models.User = Depends(get_current_user)
+):
     # Only administrators can create groups
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
     group, created = await models.Group.get_or_create(name=group_name)
     if created:
         logger.info(f"Group created: {group_name}")
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
+        return RedirectResponse(url="/admin/", status_code=303)
     else:
         raise HTTPException(status_code=400, detail="Group already exists")
 
 
 # Rename an existing group
 @app.post("/admin/rename_group")
-async def rename_group(group_id: int = Form(...), new_name: str = Form(...),
-                       current_user: models.User = Depends(get_current_user)):
+async def rename_group(
+    group_id: int = Form(...),
+    new_name: str = Form(...),
+    current_user: models.User = Depends(get_current_user),
+):
     # Only administrators can rename groups
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -395,7 +450,7 @@ async def rename_group(group_id: int = Form(...), new_name: str = Form(...),
         group.name = new_name
         await group.save()
         logger.info(f"Group renamed to: {new_name}")
-        return RedirectResponse(url="/admin/dashboard", status_code=303)
+        return RedirectResponse(url="/admin/", status_code=303)
     except DoesNotExist:
         raise HTTPException(status_code=404, detail="Group not found")
 
@@ -407,8 +462,7 @@ class GroupDeleteRequest(BaseModel):
 
 @app.post("/admin/delete_group")
 async def delete_group(
-        request: GroupDeleteRequest,
-        current_user: models.User = Depends(get_current_user)
+    request: GroupDeleteRequest, current_user: models.User = Depends(get_current_user)
 ):
     # Only administrators can delete groups
     if not await is_administrator(current_user, "administrators"):
@@ -422,12 +476,16 @@ async def delete_group(
         return JSONResponse(content={"success": True})
     except DoesNotExist:
         logger.error(f"Group '{name}' not found")
-        return JSONResponse(content={"success": False, "error": f"Group '{name}' not found"})
+        return JSONResponse(
+            content={"success": False, "error": f"Group '{name}' not found"}
+        )
 
 
 # Handle user deletion
 @app.post("/admin/delete_user")
-async def delete_user(username: str = Form(...), current_user: models.User = Depends(get_current_user)):
+async def delete_user(
+    username: str = Form(...), current_user: models.User = Depends(get_current_user)
+):
     # Only administrators can delete users
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -440,7 +498,7 @@ async def delete_user(username: str = Form(...), current_user: models.User = Dep
         user_to_delete = await models.User.get(username=username)
         await user_to_delete.delete()
         logger.info(f"User deleted: {username}")
-        return RedirectResponse(url="/admin/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url="/admin/", status_code=status.HTTP_303_SEE_OTHER)
     except DoesNotExist:
         logger.warning(f"Attempted to delete non-existent user: {username}")
         raise HTTPException(status_code=404, detail="User not found")
@@ -455,9 +513,10 @@ class PasswordChangeRequest(BaseModel):
 # Route to change user's password
 @app.post("/admin/change_user_password", response_class=JSONResponse)
 async def change_user_password(
-        request: Request,
-        password_change: PasswordChangeRequest,
-        current_user: models.User = Depends(get_current_user)):
+    request: Request,
+    password_change: PasswordChangeRequest,
+    current_user: models.User = Depends(get_current_user),
+):
     # Only administrators can change user passwords
     if not await is_administrator(current_user, "administrators"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -472,14 +531,16 @@ async def change_user_password(
     user.hashed_password = hashed_password
     await user.save()
 
-    logger.info(f"Password changed for user: {user.username} by admin: {current_user.username}")
+    logger.info(
+        f"Password changed for user: {user.username} by admin: {current_user.username}"
+    )
     return JSONResponse(content={"success": True})
 
 
 # Logout route
-@app.post("/logout")
+@app.get("/logout")
 async def logout():
-    response = RedirectResponse(url="/admin", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(key="access_token")
     logger.info("User logged out and access_token cookie deleted")
     return response
@@ -502,37 +563,32 @@ async def login_json(data: AuthRequest):
     user = await authenticate_user(data.username, data.password)
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
         )
     expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    token = auth.create_access_token(
-        data={"sub": user.username},
-        expires_delta=expires
-    )
+    token = auth.create_access_token(data={"sub": user.username}, expires_delta=expires)
     return AuthResponse(access_token=token)
-
-
-async def check_access(user):
-    if not (await is_user_in_group(user, "administrators") or
-            await is_user_in_group(user, "managers")):
-        raise HTTPException(status_code=403, detail="Permission denied")
 
 
 # Список контейнеров + кнопки start/stop/remove
 @app.get("/containers/ui", response_class=HTMLResponse)
-async def containers_ui(request: Request, current_user: models.User = Depends(get_current_user)):
+async def containers_ui(
+    request: Request, current_user: models.User = Depends(get_current_user)
+):
     await check_access(current_user)
-    cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={current_user.id}"})
-    return templates.TemplateResponse("containers.html", {
-        "request": request,
-        "containers": cntrs
-    })
+    cntrs = docker_client.containers.list(
+        all=True, filters={"label": f"owner={current_user.id}"}
+    )
+    return templates.TemplateResponse(
+        "containers.html", {"request": request, "containers": cntrs}
+    )
 
 
 # Запустить форму new container
 @app.get("/containers/ui/run", response_class=HTMLResponse)
-async def run_form(request: Request, current_user: models.User = Depends(get_current_user)):
+async def run_form(
+    request: Request, current_user: models.User = Depends(get_current_user)
+):
     await check_access(current_user)
     return templates.TemplateResponse("run_container.html", {"request": request})
 
@@ -540,13 +596,13 @@ async def run_form(request: Request, current_user: models.User = Depends(get_cur
 # Обработать запуск
 @app.post("/containers/ui/run", response_class=HTMLResponse)
 async def run_submit(
-        request: Request,
-        image: str = Form(...),
-        name: str = Form(...),
-        mem_limit: str = Form("512m"),
-        cpu_quota: int = Form(50000),
-        volumes: str = Form(""),  # строки через запятую host:cont[:mode]
-        current_user: models.User = Depends(get_current_user)
+    request: Request,
+    image: str = Form(...),
+    name: str = Form(...),
+    mem_limit: str = Form("512m"),
+    cpu_quota: int = Form(50000),
+    volumes: str = Form(""),  # строки через запятую host:cont[:mode]
+    current_user: models.User = Depends(get_current_user),
 ):
     await check_access(current_user)
     # конвертация volumes
@@ -559,10 +615,16 @@ async def run_submit(
         mem_limit=mem_limit,
         cpu_quota=cpu_quota,
         labels={"owner": str(current_user.id)},
-        volumes={Path(v.split(":", 1)[0]).resolve().as_posix(): {
-            "bind": v.split(":", 2)[1],
-            "mode": (v.split(":", 2)[2] if len(v.split(":", 2)) == 3 else "rw")
-        } for v in vol_list} or None
+        volumes={
+            Path(v.split(":", 1)[0])
+            .resolve()
+            .as_posix(): {
+                "bind": v.split(":", 2)[1],
+                "mode": (v.split(":", 2)[2] if len(v.split(":", 2)) == 3 else "rw"),
+            }
+            for v in vol_list
+        }
+        or None,
     )
     return RedirectResponse(url="/containers/ui", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -602,9 +664,13 @@ async def ui_remove(ctr_id: str, current_user: models.User = Depends(get_current
 
 # Список образов
 @app.get("/images/ui", response_class=HTMLResponse)
-async def images_ui(request: Request, current_user: models.User = Depends(get_current_user)):
+async def images_ui(
+    request: Request, current_user: models.User = Depends(get_current_user)
+):
     await check_access(current_user)
-    cntrs = docker_client.containers.list(all=True, filters={"label": f"owner={current_user.id}"})
+    cntrs = docker_client.containers.list(
+        all=True, filters={"label": f"owner={current_user.id}"}
+    )
     img_ids = {c.image.id for c in cntrs}
     images = []
     for img_id in img_ids:
@@ -613,19 +679,19 @@ async def images_ui(request: Request, current_user: models.User = Depends(get_cu
             images.append(img)
         except docker.errors.ImageNotFound:
             continue
-    return templates.TemplateResponse("images.html", {
-        "request": request,
-        "images": images
-    })
+    return templates.TemplateResponse(
+        "images.html", {"request": request, "images": images}
+    )
 
 
 # Удалить образ
 @app.post("/images/ui/{image_id}/remove")
-async def ui_remove_image(image_id: str, current_user: models.User = Depends(get_current_user)):
+async def ui_remove_image(
+    image_id: str, current_user: models.User = Depends(get_current_user)
+):
     await check_access(current_user)
     cntrs = docker_client.containers.list(
-        all=True,
-        filters={"label": f"owner={current_user.id}", "ancestor": image_id}
+        all=True, filters={"label": f"owner={current_user.id}", "ancestor": image_id}
     )
     if any(c.status != "exited" for c in cntrs):
         raise HTTPException(400, "Containers still running")

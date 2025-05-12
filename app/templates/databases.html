@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Your Databases</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-3xl mx-auto bg-white p-6 shadow rounded space-y-6">
+    <h1 class="text-2xl font-bold">Your Databases</h1>
+
+    {% if new_db %}
+      <div class="p-4 bg-green-100 text-green-800 rounded">
+        <h2 class="font-semibold mb-2">New Database Created!</h2>
+        <p><strong>Name:</strong> {{ new_db.name }}</p>
+        <p><strong>User:</strong> <code>{{ new_db.db_user }}</code></p>
+        <p><strong>Password:</strong> <code>{{ new_db.password }}</code></p>
+        <p><strong>Salt:</strong> <code>{{ new_db.salt }}</code></p>
+        <p class="text-sm text-gray-600">Password will not be shown again without salt.</p>
+      </div>
+    {% endif %}
+
+    {% if salt_error %}
+      <div class="p-3 bg-red-100 text-red-800 rounded mb-4">{{ salt_error }}</div>
+    {% endif %}
+
+    <table class="w-full table-auto border-collapse">
+      <thead>
+        <tr class="bg-gray-200">
+          <th class="border px-2 py-1">Name</th>
+          <th class="border px-2 py-1">DB User</th>
+          <th class="border px-2 py-1">Created At</th>
+          <th class="border px-2 py-1">Reveal Password</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for db in databases %}
+        <tr>
+          <td class="border px-2 py-1">{{ db.name }}</td>
+          <td class="border px-2 py-1 font-mono">{{ db.db_user }}</td>
+          <td class="border px-2 py-1">{{ db.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="border px-2 py-1">
+            <form
+              action="/stacks/databases/{{ db.id }}/reveal"
+              method="post"
+              class="reveal-form flex space-x-2"
+              data-db-id="{{ db.id }}"
+            >
+              <input
+                name="salt"
+                required
+                placeholder="Enter salt"
+                class="border rounded px-2 py-1 flex-1"
+              />
+              <button
+                type="submit"
+                class="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700"
+              >
+                Reveal
+              </button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="4" class="text-center py-4">No databases yet.</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="border-t pt-4">
+      <h2 class="text-xl font-semibold mb-2">Create New Database</h2>
+      <form action="/stacks/databases/create" method="post" class="space-y-4">
+        <div>
+          <label class="block mb-1 font-medium">Database Name</label>
+          <input
+            name="name"
+            required
+            class="w-full border rounded px-2 py-1"
+            placeholder="mydb"
+          />
+        </div>
+        <button
+          type="submit"
+          class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+        >
+          Create
+        </button>
+      </form>
+    </div>
+
+    <div class="mt-6">
+      <a href="/stacks/" class="text-gray-600 hover:underline">← Back to Containers</a>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('form.reveal-form').forEach(form => {
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const action = form.getAttribute('action');
+        const salt = form.querySelector('input[name="salt"]').value;
+        let res, data;
+        try {
+          res = await fetch(action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ salt })
+          });
+          data = await res.json();
+        } catch (err) {
+          return alert('Network error');
+        }
+        if (data.success) {
+          // Показать пароль и кнопку копирования
+          form.outerHTML = `
+            <code class="font-mono bg-gray-100 px-2 py-1 rounded">${data.password}</code>
+            <button
+              onclick="navigator.clipboard.writeText('${data.password}')"
+              class="ml-2 bg-gray-200 px-2 py-1 rounded hover:bg-gray-300"
+            >
+              Copy
+            </button>`;
+        } else {
+          alert(data.error);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
