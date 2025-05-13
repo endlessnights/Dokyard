@@ -1,9 +1,13 @@
 # app/routers/stacks/.py
+import base64
+import io
 import os
 import platform
 import logging
 import re
 import secrets
+import subprocess
+import tempfile
 from datetime import datetime
 
 import asyncpg
@@ -13,6 +17,9 @@ from pathlib import Path
 from typing import Optional
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from fastapi import (
     APIRouter,
     Request,
@@ -26,7 +33,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from app.models import User, ComposeStack, UserDatabase
 from app.user_manager import get_current_user
@@ -54,11 +61,38 @@ SALT_WORDS = [
 ]
 
 
+def derive_fernet_key(salt: str) -> bytes:
+    """
+    Из MASTER_KEY (из env) + salt строим 32-байтный ключ для Fernet.
+    """
+    master = os.getenv("FERNET_KEY", "").encode()
+    if not master:
+        raise RuntimeError("FERNET_KEY is not set")
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt.encode(),
+        iterations=390_000,
+        backend=default_backend()
+    )
+    return base64.urlsafe_b64encode(kdf.derive(master))
+
+
+MAX_DB_PER_USER = os.getenv("MAX_DB_PER_USER")
+
+
+def get_fernet_for_salt(salt: str) -> Fernet:
+    return Fernet(derive_fernet_key(salt))
+
+
 def get_fernet() -> Fernet:
     key = os.getenv("FERNET_KEY", "FERNET_KEY")
     if not key:
         raise RuntimeError("FERNET_KEY not set in env")
     return Fernet(key)
+
+
+MAX_TOTAL_DB_SIZE = 500 * 1024 * 1024
 
 
 def simplify_docker_error(e: docker.errors.APIError) -> str:
@@ -528,18 +562,23 @@ async def ui_remove_image(
 @router.get("/databases", response_class=HTMLResponse)
 async def databases_ui(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
-    dbs = await UserDatabase.filter(owner=user).order_by("-created_at")
-    # вытащим единоразочные данные из сессии, если они есть
+    # one-time creation info
     new_db = request.session.pop("new_db", None)
-    revealed = request.session.pop("revealed", {})
-    salt_error = request.session.pop("salt_error", None)
+    # any error/success messages
+    db_error = request.session.pop("db_error", None)
+    db_success = request.session.pop("db_success", None)
+
+    dbs = await UserDatabase.filter(owner=user).order_by("created_at")
+    count = len(dbs)
 
     return templates.TemplateResponse("databases.html", {
         "request": request,
         "databases": dbs,
         "new_db": new_db,
-        "revealed": revealed,
-        "salt_error": salt_error
+        "db_error": db_error,
+        "db_success": db_success,
+        "count": count,
+        "max": int(MAX_DB_PER_USER),
     })
 
 
@@ -547,53 +586,62 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
 async def create_database(
         request: Request,
         name: str = Form(...),
-        user: User = Depends(get_current_user)
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
-    if await UserDatabase.filter(owner=user).count() >= 3:
-        request.session["salt_error"] = "You have reached the limit of 3 databases"
-        return RedirectResponse("/stacks/databases", 303)
 
-    # генерим креды
+    # ограничение по количеству
+    if await UserDatabase.filter(owner=user).count() >= 3:
+        request.session["db_error"] = "You have reached the limit of 3 databases"
+        return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
+
+    # уникальный суффикс для имени
+    suffix = f"_u{user.id}"
+    db_name = f"{name}{suffix}"
+
+    # генерим юзера и пароль
     db_user = f"{user.username}_{secrets.token_hex(3)}"
     raw_password = secrets.token_urlsafe(12)
+
+    # генерим одноразовый salt
     salt = "-".join(secrets.choice(SALT_WORDS) for _ in range(3))
-    f = get_fernet()
+    f = get_fernet_for_salt(salt)
     encrypted = f.encrypt(raw_password.encode()).decode()
 
-    # создаём реальную БД
+    # создаём в Postgres
     try:
         conn = await asyncpg.connect(
             user=os.getenv("POSTGRES_USER_USER"),
             password=os.getenv("POSTGRES_USER_PASSWORD"),
-            database=os.getenv("POSTGRES_USER_DB"),
+            database=os.getenv("POSTGRES_USER_DB", "postgres"),
             host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
             port=int(os.getenv("PGDB_USER_PORT", 5432)),
         )
         await conn.execute(f'CREATE USER "{db_user}" WITH PASSWORD \'{raw_password}\';')
-        await conn.execute(f'CREATE DATABASE "{name}" OWNER "{db_user}";')
+        await conn.execute(f'CREATE DATABASE "{db_name}" OWNER "{db_user}";')
         await conn.close()
     except Exception as e:
-        request.session["salt_error"] = f"Postgres error: {e}"
-        return RedirectResponse("/stacks/databases", 303)
+        request.session["db_error"] = f"Postgres error: {e}"
+        return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
 
-    # сохраняем мета
+    # сохраняем только зашифрованный пароль
     db = await UserDatabase.create(
-        name=name,
+        name=db_name,
         owner=user,
         db_user=db_user,
-        db_password_encrypted=encrypted,
-        salt_phrase=salt
+        db_password_encrypted=encrypted
     )
 
-    # передадим единоразочно в UI
+    # кладём в сессию одноразово
     request.session["new_db"] = {
-        "id": db.id, "name": name,
+        "id": db.id,
+        "name": db_name,
         "db_user": db_user,
         "password": raw_password,
         "salt": salt
     }
-    return RedirectResponse("/stacks/databases", 303)
+
+    return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
 
 
 class RevealRequest(BaseModel):
@@ -603,21 +651,59 @@ class RevealRequest(BaseModel):
 @router.post("/databases/{db_id}/reveal")
 async def reveal_database(
         db_id: int,
-        payload: RevealRequest = Body(...),
-        user: User = Depends(get_current_user)
+        request: Request,
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
-    # находим запись
+
+    # ищем запись
     db = await UserDatabase.get_or_none(id=db_id, owner=user)
     if not db:
-        return JSONResponse({"success": False, "error": "Database not found"})
-    # проверяем salt
-    if payload.salt != db.salt_phrase:
-        return JSONResponse({"success": False, "error": "Invalid salt"})
-    # расшифровываем пароль
-    f = get_fernet()
-    raw = f.decrypt(db.db_password_encrypted.encode()).decode()
+        raise HTTPException(status_code=404, detail="Database not found")
+
+    # достаём salt из JSON body
+    payload = await request.json()
+    salt = payload.get("salt", "")
+
+    # строим тот же Fernet и дешифруем
+    try:
+        f = get_fernet_for_salt(salt)
+        raw = f.decrypt(db.db_password_encrypted.encode()).decode()
+    except Exception:
+        return JSONResponse({"success": False, "error": "Invalid salt or decryption failed"})
+
     return JSONResponse({"success": True, "password": raw})
+
+
+@router.post("/databases/{db_id}/delete")
+async def delete_database(
+    db_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    await check_access(user)
+    db = await UserDatabase.get_or_none(id=db_id, owner=user)
+    if not db:
+        request.session["db_error"] = "Database not found"
+        return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        conn = await asyncpg.connect(
+            user=os.getenv("POSTGRES_USER_USER"),
+            password=os.getenv("POSTGRES_USER_PASSWORD"),
+            database=os.getenv("POSTGRES_USER_DB", "postgres"),
+            host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
+            port=int(os.getenv("PGDB_USER_PORT", 5432)),
+        )
+        await conn.execute(f'DROP DATABASE IF EXISTS "{db.name}";')
+        await conn.execute(f'DROP USER IF EXISTS "{db.db_user}";')
+        await conn.close()
+        await db.delete()
+        request.session["db_success"] = f"Database '{db.name}' deleted."
+    except Exception as e:
+        request.session["db_error"] = f"Error deleting database: {e}"
+
+    return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/fs", response_class=HTMLResponse)

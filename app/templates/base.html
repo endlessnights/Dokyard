@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}Dokyard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .accent { color: #4F46E5; }
+    .accent-bg { background-color: #4F46E5; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-50 text-gray-800 antialiased" data-lang="ru">
+
+  <!-- HEADER -->
+  <header class="bg-white shadow">
+    <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="text-2xl font-bold accent">🐋 Dokyard</a>
+      <nav class="space-x-4 flex items-center">
+        <a href="/" class="hover:text-accent">
+          <span class="lang-ru">Главная</span>
+          <span class="lang-en hidden">Home</span>
+        </a>
+
+        {% if user_group != "guest" %}
+          <a href="/stacks" class="hover:text-accent">
+            <span class="lang-ru">Контейнеры</span>
+            <span class="lang-en hidden">Stacks</span>
+          </a>
+          <a href="/stacks/databases" class="hover:text-accent">
+            <span class="lang-ru">Базы данных</span>
+            <span class="lang-en hidden">Databases</span>
+          </a>
+          <a href="/logout" class="hover:text-accent">
+            <span class="lang-ru">Выйти</span>
+            <span class="lang-en hidden">Logout</span>
+          </a>
+        {% else %}
+          <a href="/login" class="hover:text-accent">
+            <span class="lang-ru">Войти</span>
+            <span class="lang-en hidden">Login</span>
+          </a>
+          <a href="/register" class="px-4 py-2 accent-bg text-white rounded hover:opacity-90">
+            <span class="lang-ru">Регистрация</span>
+            <span class="lang-en hidden">Sign Up</span>
+          </a>
+        {% endif %}
+
+        <button id="lang-switch" class="ml-4 px-2 py-1 border rounded text-sm">
+          <span class="lang-ru">EN</span>
+          <span class="lang-en hidden">RU</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main class="container mx-auto px-6 py-10">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="bg-gray-800 text-gray-300 py-8">
+    <div class="container mx-auto px-6 text-center space-y-4">
+      <p>
+        <span class="lang-ru">© 2025 Dokyard — Open-Source PaaS для Docker</span>
+        <span class="lang-en hidden">© 2025 Dokyard — Open-Source Docker PaaS</span>
+      </p>
+      <p>
+        <span class="lang-ru">Мы не храним пароли ваших сервисов в открытом виде!</span>
+        <span class="lang-en hidden">We do NOT store your service passwords in plain text!</span>
+      </p>
+    </div>
+  </footer>
+
+  <!-- LANG SWITCHER SCRIPT -->
+  <script>
+    (function(){
+      const userLang = navigator.language.startsWith('en') ? 'en' : 'ru';
+      const setLang = lang => {
+        document.body.setAttribute('data-lang', lang);
+        document.querySelectorAll('.lang-ru, .lang-en').forEach(el=>{
+          el.classList.toggle('hidden', !el.classList.contains('lang-'+lang));
+        });
+        document.getElementById('lang-switch').querySelectorAll('span').forEach(el=>{
+          el.classList.toggle('hidden', !el.classList.contains('lang-'+(lang==='ru'?'en':'ru')));
+        });
+      };
+      setLang(userLang);
+      document.getElementById('lang-switch').addEventListener('click',()=>{
+        const newLang = document.body.getAttribute('data-lang') === 'ru' ? 'en' : 'ru';
+        setLang(newLang);
+      });
+    })();
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -50,7 +50,6 @@ class UserDatabase(models.Model):
     owner = fields.ForeignKeyField("models.User", related_name="databases")
     db_user = fields.CharField(max_length=100)
     db_password_encrypted = fields.TextField()
-    salt_phrase = fields.CharField(max_length=100)
     created_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:

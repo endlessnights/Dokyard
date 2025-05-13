@@ -1,220 +1,80 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Dokyard • Управление Docker-контейнерами</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .accent { color: #4F46E5; }
-    .accent-bg { background-color: #4F46E5; }
-  </style>
-</head>
-<body class="bg-gray-50 text-gray-800 antialiased" data-lang="ru">
+{% extends "base.html" %}
 
-  <!-- HEADER -->
-  <header class="bg-white shadow">
-    <div class="container mx-auto px-6 py-4 flex justify-between items-center">
-      <a href="/" class="text-2xl font-bold accent">🐋 Dokyard</a>
-      <nav class="space-x-4 flex items-center">
-        <a href="/" class="hover:text-accent">
-          <span class="lang-ru">Главная</span>
-          <span class="lang-en hidden">Home</span>
-        </a>
-        <a href="/login" class="hover:text-accent">
-          <span class="lang-ru">Войти</span>
-          <span class="lang-en hidden">Login</span>
-        </a>
-        <a href="/register" class="px-4 py-2 accent-bg text-white rounded hover:opacity-90">
-          <span class="lang-ru">Регистрация</span>
-          <span class="lang-en hidden">Sign Up</span>
-        </a>
-        <!-- language switcher -->
-        <button id="lang-switch" class="ml-4 px-2 py-1 border rounded text-sm">
-          <span class="lang-ru">EN</span>
-          <span class="lang-en hidden">RU</span>
-        </button>
-      </nav>
-    </div>
-  </header>
+{% block title %}Dokyard • Управление Docker-контейнерами{% endblock %}
 
-  <!-- HERO -->
-  <section class="container mx-auto px-6 py-20 text-center">
-    <h1 class="text-4xl font-extrabold mb-4">
-      <span class="lang-ru">Полный контроль над Docker-контейнерами</span>
-      <span class="lang-en hidden">Full control over Docker containers</span>
-    </h1>
-    <p class="text-lg text-gray-600 mb-8">
-      <span class="lang-ru">
-        Управляйте контейнерами, стеками и образами через удобный веб-интерфейс — быстро, безопасно и открыто.
-      </span>
-      <span class="lang-en hidden">
-        Manage containers, stacks and images via an intuitive web UI — fast, secure and open-source.
-      </span>
-    </p>
-    <a href="/register"
-       class="inline-block px-8 py-4 accent-bg text-white font-semibold rounded-lg shadow hover:shadow-lg transition">
-      <span class="lang-ru">Начать бесплатно</span>
-      <span class="lang-en hidden">Get Started</span>
-    </a>
-  </section>
+{% block content %}
+<!-- HERO -->
+<section class="container mx-auto px-6 py-20 text-center">
+  <h1 class="text-4xl font-extrabold mb-4">
+    <span class="lang-ru">Полный контроль над Docker-контейнерами</span>
+    <span class="lang-en hidden">Full control over Docker containers</span>
+  </h1>
+  <p class="text-lg text-gray-600 mb-8">
+    <span class="lang-ru">
+      Управляйте контейнерами, стеками и образами через удобный веб-интерфейс — быстро, безопасно и открыто.
+    </span>
+    <span class="lang-en hidden">
+      Manage containers, stacks and images via an intuitive web UI — fast, secure and open-source.
+    </span>
+  </p>
+  <a href="/register"
+     class="inline-block px-8 py-4 accent-bg text-white font-semibold rounded-lg shadow hover:shadow-lg transition">
+    <span class="lang-ru">Начать бесплатно</span>
+    <span class="lang-en hidden">Get Started</span>
+  </a>
+</section>
 
-  <!-- FEATURES -->
-  <section class="bg-white py-16">
-    <div class="container mx-auto px-6">
-      <h2 class="text-3xl font-bold text-center mb-12">
-        <span class="lang-ru">Возможности платформы</span>
-        <span class="lang-en hidden">Platform Features</span>
-      </h2>
-      <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-        <!-- feature 1 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">🔐</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Регистрация и аутентификация</span>
-            <span class="lang-en hidden">User Registration & Authentication</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Встроенное управление пользователями и группами.</span>
-            <span class="lang-en hidden">Built-in user and group management.</span>
-          </p>
-        </div>
-        <!-- feature 2 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">🐳</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Управление контейнерами</span>
-            <span class="lang-en hidden">Container Management</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Запуск, остановка и удаление через веб-UI.</span>
-            <span class="lang-en hidden">Start, stop & remove containers via web UI.</span>
-          </p>
-        </div>
-        <!-- feature 3 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">🧱</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Стеки docker-compose</span>
-            <span class="lang-en hidden">Docker-Compose Stacks</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Редактирование YAML и повторный деплой.</span>
-            <span class="lang-en hidden">YAML editing & redeploy support.</span>
-          </p>
-        </div>
-        <!-- feature 4 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">📦</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Управление образами</span>
-            <span class="lang-en hidden">Image Management</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Просмотр, удаление и статус использования.</span>
-            <span class="lang-en hidden">View, delete & check usage status.</span>
-          </p>
-        </div>
-        <!-- feature 5 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">📁</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Файловый браузер</span>
-            <span class="lang-en hidden">File Browser</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Доступ к volume-директориям в браузере.</span>
-            <span class="lang-en hidden">Access volume directories in your browser.</span>
-          </p>
-        </div>
-        <!-- feature 6 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">📜</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Просмотр логов</span>
-            <span class="lang-en hidden">Logs Viewer</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Логи работающих и остановленных контейнеров.</span>
-            <span class="lang-en hidden">View logs of running & stopped containers.</span>
-          </p>
-        </div>
-        <!-- feature 7 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">⏱</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Время работы</span>
-            <span class="lang-en hidden">Uptime Display</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Аптайм-метр для каждого контейнера.</span>
-            <span class="lang-en hidden">Show container uptime easily.</span>
-          </p>
-        </div>
-        <!-- feature 8 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">🌐</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Docker Hub токен</span>
-            <span class="lang-en hidden">Docker Hub Auth</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Аутентификация через токен и показ сессии.</span>
-            <span class="lang-en hidden">Token auth & session display.</span>
-          </p>
-        </div>
-        <!-- feature 9 -->
-        <div class="p-6 border rounded-lg hover:shadow-lg transition">
-          <div class="text-4xl mb-4">☁️</div>
-          <h3 class="text-xl font-semibold mb-2">
-            <span class="lang-ru">Strict & Relaxed</span>
-            <span class="lang-en hidden">Strict & Relaxed Modes</span>
-          </h3>
-          <p class="text-gray-600">
-            <span class="lang-ru">Полный или частичный деплой стеков.</span>
-            <span class="lang-en hidden">All-or-nothing or partial stack deploy.</span>
-          </p>
-        </div>
+<!-- FEATURES -->
+<section class="bg-white py-16">
+  <div class="container mx-auto px-6">
+    <h2 class="text-3xl font-bold text-center mb-12">
+      <span class="lang-ru">Возможности платформы</span>
+      <span class="lang-en hidden">Platform Features</span>
+    </h2>
+    <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+      {% set features = [
+        {'icon': '🔐', 'title_ru': 'Регистрация и аутентификация', 'title_en': 'User Registration & Authentication',
+         'desc_ru': 'Встроенное управление пользователями и группами.',
+         'desc_en': 'Built-in user and group management.'},
+        {'icon': '🐳', 'title_ru': 'Управление контейнерами', 'title_en': 'Container Management',
+         'desc_ru': 'Запуск, остановка и удаление через веб-UI.',
+         'desc_en': 'Start, stop & remove containers via web UI.'},
+        {'icon': '🧱', 'title_ru': 'Стеки docker-compose', 'title_en': 'Docker-Compose Stacks',
+         'desc_ru': 'Редактирование YAML и повторный деплой.',
+         'desc_en': 'YAML editing & redeploy support.'},
+        {'icon': '📦', 'title_ru': 'Управление образами', 'title_en': 'Image Management',
+         'desc_ru': 'Просмотр, удаление и статус использования.',
+         'desc_en': 'View, delete & check usage status.'},
+        {'icon': '📁', 'title_ru': 'Файловый браузер', 'title_en': 'File Browser',
+         'desc_ru': 'Доступ к volume-директориям в браузере.',
+         'desc_en': 'Access volume directories in your browser.'},
+        {'icon': '📜', 'title_ru': 'Просмотр логов', 'title_en': 'Logs Viewer',
+         'desc_ru': 'Логи работающих и остановленных контейнеров.',
+         'desc_en': 'View logs of running & stopped containers.'},
+        {'icon': '⏱', 'title_ru': 'Время работы', 'title_en': 'Uptime Display',
+         'desc_ru': 'Аптайм-метр для каждого контейнера.',
+         'desc_en': 'Show container uptime easily.'},
+        {'icon': '🌐', 'title_ru': 'Docker Hub токен', 'title_en': 'Docker Hub Auth',
+         'desc_ru': 'Аутентификация через токен и показ сессии.',
+         'desc_en': 'Token auth & session display.'},
+        {'icon': '☁️', 'title_ru': 'Strict & Relaxed', 'title_en': 'Strict & Relaxed Modes',
+         'desc_ru': 'Полный или частичный деплой стеков.',
+         'desc_en': 'All-or-nothing or partial stack deploy.'},
+      ] %}
+      {% for f in features %}
+      <div class="p-6 border rounded-lg hover:shadow-lg transition">
+        <div class="text-4xl mb-4">{{ f.icon }}</div>
+        <h3 class="text-xl font-semibold mb-2">
+          <span class="lang-ru">{{ f.title_ru }}</span>
+          <span class="lang-en hidden">{{ f.title_en }}</span>
+        </h3>
+        <p class="text-gray-600">
+          <span class="lang-ru">{{ f.desc_ru }}</span>
+          <span class="lang-en hidden">{{ f.desc_en }}</span>
+        </p>
       </div>
+      {% endfor %}
     </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="bg-gray-800 text-gray-300 py-8">
-    <div class="container mx-auto px-6 text-center space-y-4">
-      <p>
-        <span class="lang-ru">© 2025 Dokyard — Open-Source PaaS для Docker</span>
-        <span class="lang-en hidden">© 2025 Dokyard — Open-Source Docker PaaS</span>
-      </p>
-      <p>
-        <span class="lang-ru">Мы не храним пароли ваших сервисов в открытом виде!</span>
-        <span class="lang-en hidden">We do NOT store your service passwords in plain text!</span>
-      </p>
-    </div>
-  </footer>
-
-  <!-- LANG SWITCHER SCRIPT -->
-  <script>
-    (function(){
-      const userLang = navigator.language.startsWith('en') ? 'en' : 'ru';
-      const setLang = lang => {
-        document.body.setAttribute('data-lang', lang);
-        document.querySelectorAll('.lang-ru, .lang-en').forEach(el=>{
-          el.classList.toggle('hidden', !el.classList.contains('lang-'+lang));
-        });
-        // update switcher label
-        document.getElementById('lang-switch').querySelectorAll('span').forEach(el=>{
-          el.classList.toggle('hidden', !el.classList.contains('lang-'+(lang==='ru'?'en':'ru')));
-        });
-      };
-      // init
-      setLang(userLang);
-      document.getElementById('lang-switch').addEventListener('click',()=>{
-        const newLang = document.body.getAttribute('data-lang') === 'ru' ? 'en' : 'ru';
-        setLang(newLang);
-      });
-    })();
-  </script>
-
-</body>
-</html>
+  </div>
+</section>
+{% endblock %}
