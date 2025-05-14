@@ -793,8 +793,9 @@ async def create_database(
     f = get_fernet_for_salt(salt)
     encrypted = f.encrypt(raw_password.encode()).decode()
 
-    # создаём в Postgres
+    # создаём в Postgres и настраиваем права
     try:
+        # 1) Подключаемся к админ-БД
         conn = await asyncpg.connect(
             user=os.getenv("POSTGRES_USER_USER"),
             password=os.getenv("POSTGRES_USER_PASSWORD"),
@@ -802,9 +803,39 @@ async def create_database(
             host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
             port=int(os.getenv("PGDB_USER_PORT", 5432)),
         )
-        await conn.execute(f"CREATE USER \"{db_user}\" WITH PASSWORD '{raw_password}';")
+
+        # 2) Создаём роль и базу
+        await conn.execute(f'CREATE USER "{db_user}" WITH PASSWORD \'{raw_password}\';')
         await conn.execute(f'CREATE DATABASE "{db_name}" OWNER "{db_user}";')
+
+        # 3) Отзываем PUBLIC-connect и даём только нашему юзеру
+        await conn.execute(f'REVOKE CONNECT ON DATABASE "{db_name}" FROM PUBLIC;')
+        await conn.execute(f'GRANT CONNECT ON DATABASE "{db_name}" TO "{db_user}";')
+
+        # 4) Отзываем CONNECT на всех остальных базах для этой роли
+        rows = await conn.fetch(
+            "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> $1;",
+            db_name
+        )
+        for r in rows:
+            await conn.execute(f'REVOKE CONNECT ON DATABASE "{r["datname"]}" FROM "{db_user}";')
+
         await conn.close()
+
+        # 5) Подключаемся к только что созданной БД, чтобы навести порядок в схеме public
+        db_conn = await asyncpg.connect(
+            user=os.getenv("POSTGRES_USER_USER"),
+            password=os.getenv("POSTGRES_USER_PASSWORD"),
+            database=db_name,
+            host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
+            port=int(os.getenv("PGDB_USER_PORT", 5432)),
+        )
+        # Отзываем все права PUBLIC на схему public
+        await db_conn.execute('REVOKE ALL ON SCHEMA public FROM PUBLIC;')
+        # Даём нашему пользователю CREATE и USAGE на public
+        await db_conn.execute(f'GRANT CREATE, USAGE ON SCHEMA public TO "{db_user}";')
+        await db_conn.close()
+
     except Exception as e:
         request.session["db_error"] = f"Postgres error: {e}"
         return RedirectResponse(
@@ -881,7 +912,7 @@ async def delete_database(
             password=os.getenv("POSTGRES_USER_PASSWORD"),
             database=os.getenv("POSTGRES_USER_DB", "postgres"),
             host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
-            port=int(os.geenv("PGDB_USER_PORT", 5432)),
+            port=int(os.getenv("PGDB_USER_PORT", 5432)),
         )
         await conn.execute(f'DROP DATABASE IF EXISTS "{db.name}";')
         await conn.execute(f'DROP USER IF EXISTS "{db.db_user}";')
