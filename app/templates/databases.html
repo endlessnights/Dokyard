@@ -2,7 +2,7 @@
 {% block title %}Ваши базы данных — Dokyard{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto bg-white p-6 shadow rounded space-y-6">
+<div class="w-full mx-auto bg-white p-6 shadow rounded space-y-6">
   <h1 class="text-2xl font-bold">Your Databases ({{ count }}/{{ max }})</h1>
 
   {% if db_success %}
@@ -38,7 +38,7 @@
       <tr>
         <td class="border px-2 py-1">{{ db.name }}</td>
         <td class="border px-2 py-1 font-mono">{{ db.db_user }}</td>
-        <td class="border px-2 py-1">{{ db.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td class="border px-2 py-1">{{ db.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
         <td class="border px-2 py-1" id="reveal-cell-{{ db.id }}">
           <form class="reveal-form flex space-x-2" data-db-id="{{ db.id }}">
             <input name="salt" required placeholder="Enter salt" class="border rounded px-2 py-1 flex-1"/>
@@ -66,10 +66,6 @@
       </div>
       <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Create</button>
     </form>
-  </div>
-
-  <div class="mt-6">
-    <a href="/stacks/" class="text-gray-600 hover:underline">← Back to Containers</a>
   </div>
 </div>
 {% endblock %}

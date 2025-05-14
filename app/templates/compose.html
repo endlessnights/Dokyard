@@ -1,65 +1,40 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <title>Deploy via Docker Compose</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 p-6">
-  <div class="max-w-2xl mx-auto bg-white p-6 shadow rounded">
-    <h1 class="text-2xl font-bold mb-4">Deploy via Docker Compose</h1>
+{% extends "base.html" %}
+{% block title %}Deploy via Docker Compose — Dokyard{% endblock %}
 
-    {% if error %}
-      <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-        <strong class="font-bold">Ошибка:</strong>
-        <span class="block">{{ error }}</span>
-      </div>
-    {% endif %}
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white p-6 shadow rounded">
+  <h1 class="text-2xl font-bold mb-4">Deploy via Docker Compose</h1>
 
-    <form
-      action="/stacks/compose"
-      method="post"
-      enctype="multipart/form-data"
-      class="space-y-6"
-    >
-      <div>
-        <label class="block mb-1 font-medium">Upload Compose File</label>
-        <input
-          type="file"
-          name="compose_file"
-          accept=".yml,.yaml"
-          class="block w-full text-gray-700"
-        />
-        <p class="text-sm text-gray-500">или заполните YAML вручную:</p>
-      </div>
+  {% if error %}
+    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+      <strong class="font-bold">Ошибка:</strong>
+      <span class="block">{{ error }}</span>
+    </div>
+  {% endif %}
 
-      <input type="hidden" name="stack_id" value="{{ stack_id or '' }}"/>
+  <form action="/stacks/compose" method="post" enctype="multipart/form-data" class="space-y-6">
+    <div>
+      <label class="block mb-1 font-medium">Upload Compose File</label>
+      <input type="file" name="compose_file" accept=".yml,.yaml" class="block w-full text-gray-700"/>
+      <p class="text-sm text-gray-500">или заполните YAML вручную:</p>
+    </div>
 
-      <div>
-        <label class="block mb-1 font-medium">Paste Compose YAML</label>
-        <textarea
-          name="compose_text"
-          rows="10"
-          class="w-full border rounded px-2 py-1 font-mono text-sm"
-          placeholder="version: '3.8'&#10;services:&#10;  nginx:&#10;    image: nginx:latest&#10;    ports:&#10;      - &quot;8080:80&quot;"
-        >{{ compose_text | default("") }}</textarea>
-      </div>
+    <input type="hidden" name="stack_id" value="{{ stack_id or '' }}"/>
 
-      <div class="flex space-x-3">
-        <button
-          type="submit"
-          class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Deploy
-        </button>
-        <a
-          href="/stacks"
-          class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500"
-        >
-          Cancel
-        </a>
-      </div>
-    </form>
-  </div>
-</body>
-</html>
+    <div>
+      <label class="block mb-1 font-medium">Paste Compose YAML</label>
+      <textarea
+        name="compose_text"
+        rows="10"
+        class="w-full border rounded px-2 py-1 font-mono text-sm"
+        placeholder="version: '3.8'&#10;services:&#10;  nginx:&#10;    image: nginx:latest&#10;    ports:&#10;      - &quot;8080:80&quot;"
+      >{{ compose_text | default("") }}</textarea>
+    </div>
+
+    <div class="flex space-x-3">
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Deploy</button>
+      <a href="/stacks" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

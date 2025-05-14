@@ -17,7 +17,7 @@
       Manage containers, stacks and images via an intuitive web UI — fast, secure and open-source.
     </span>
   </p>
-  <a href="/register"
+  <a href="{% if user_group == 'Guest' %}/register{% else %}/stacks{% endif %}"
      class="inline-block px-8 py-4 accent-bg text-white font-semibold rounded-lg shadow hover:shadow-lg transition">
     <span class="lang-ru">Начать бесплатно</span>
     <span class="lang-en hidden">Get Started</span>

@@ -1,43 +1,37 @@
 # app/routers/stacks/.py
 import base64
 import io
+import json
+import logging
 import os
 import platform
-import logging
 import re
 import secrets
 import subprocess
 import tempfile
 from datetime import datetime
-
-import asyncpg
-import docker
-
 from pathlib import Path
 from typing import Optional
 
+import asyncpg
+import docker
+import httpx
+import yaml
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from fastapi import (
-    APIRouter,
-    Request,
-    Depends,
-    HTTPException,
-    status,
-    Form,
-    UploadFile,
-    File, Body,
-)
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi import (APIRouter, Body, Depends, File, Form, HTTPException,
+                     Request, UploadFile, status)
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.responses import JSONResponse, StreamingResponse
 
-from app.models import User, ComposeStack, UserDatabase
+from app.models import ComposeStack, DockerHubCredential, User, UserDatabase
+from app.routers.docker import ComposeSpec
+from app.routers.docker import run_compose as api_run_compose
 from app.user_manager import get_current_user
-from app.routers.docker import run_compose as api_run_compose, ComposeSpec
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -45,20 +39,143 @@ logger = logging.getLogger("ui")
 docker_client = docker.from_env()
 
 SALT_WORDS = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
-    "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango",
-    "uniform", "victor", "whiskey", "xray", "yankee", "zulu", "amber", "boulder", "cobalt", "dune",
-    "ember", "flint", "granite", "harbor", "isle", "jade", "keel", "lagoon", "marble", "nebula",
-    "onyx", "pearl", "quartz", "ripple", "sapphire", "timber", "umber", "vertex", "willow", "xenon",
-    "yellow", "zephyr", "aurora", "banyan", "cascade", "drift", "fjord", "grove", "hollow",
-    "oslo", "kyoto", "dublin", "vienna", "madrid", "paris", "berlin", "prague", "rome", "lisbon",
-    "athens", "helsinki", "zurich", "warsaw", "riga", "vilnius", "stockholm", "cairo", "jakarta",
-    "sydney", "moscow", "baku", "seoul", "delhi", "beijing", "hanoi", "bangkok", "manila", "doha",
-    "tbilisi", "amsterdam", "brussels", "sofia", "bucharest", "reykjavik", "nairobi", "capetown",
-    "lagos", "kinshasa", "santiago", "quito", "lima", "caracas", "bogota", "montevideo", "osaka",
-    "dubai", "riyadh", "kigali", "accra", "almaty", "aktau", "astana", "bishkek", "tashkent",
-    "kabul", "isfahan", "tehran", "newyork", "boston", "seattle", "miami", "houston"
+    "alpha",
+    "bravo",
+    "charlie",
+    "delta",
+    "echo",
+    "foxtrot",
+    "golf",
+    "hotel",
+    "india",
+    "juliet",
+    "kilo",
+    "lima",
+    "mike",
+    "november",
+    "oscar",
+    "papa",
+    "quebec",
+    "romeo",
+    "sierra",
+    "tango",
+    "uniform",
+    "victor",
+    "whiskey",
+    "xray",
+    "yankee",
+    "zulu",
+    "amber",
+    "boulder",
+    "cobalt",
+    "dune",
+    "ember",
+    "flint",
+    "granite",
+    "harbor",
+    "isle",
+    "jade",
+    "keel",
+    "lagoon",
+    "marble",
+    "nebula",
+    "onyx",
+    "pearl",
+    "quartz",
+    "ripple",
+    "sapphire",
+    "timber",
+    "umber",
+    "vertex",
+    "willow",
+    "xenon",
+    "yellow",
+    "zephyr",
+    "aurora",
+    "banyan",
+    "cascade",
+    "drift",
+    "fjord",
+    "grove",
+    "hollow",
+    "oslo",
+    "kyoto",
+    "dublin",
+    "vienna",
+    "madrid",
+    "paris",
+    "berlin",
+    "prague",
+    "rome",
+    "lisbon",
+    "athens",
+    "helsinki",
+    "zurich",
+    "warsaw",
+    "riga",
+    "vilnius",
+    "stockholm",
+    "cairo",
+    "jakarta",
+    "sydney",
+    "moscow",
+    "baku",
+    "seoul",
+    "delhi",
+    "beijing",
+    "hanoi",
+    "bangkok",
+    "manila",
+    "doha",
+    "tbilisi",
+    "amsterdam",
+    "brussels",
+    "sofia",
+    "bucharest",
+    "reykjavik",
+    "nairobi",
+    "capetown",
+    "lagos",
+    "kinshasa",
+    "santiago",
+    "quito",
+    "lima",
+    "caracas",
+    "bogota",
+    "montevideo",
+    "osaka",
+    "dubai",
+    "riyadh",
+    "kigali",
+    "accra",
+    "almaty",
+    "aktau",
+    "astana",
+    "bishkek",
+    "tashkent",
+    "kabul",
+    "isfahan",
+    "tehran",
+    "newyork",
+    "boston",
+    "seattle",
+    "miami",
+    "houston",
 ]
+
+
+async def _pull_with_auth(image: str, creds) -> None:
+    """
+    Если образ приватный – тянем его, передавая auth_config
+    (credstore/глобальный login не нужен).
+    """
+    try:
+        docker_client.images.pull(image, auth_config={
+            "username": creds.username,
+            "password": creds.token,
+        })
+    except docker.errors.APIError as e:
+        raise HTTPException(403, f"Pull failed: {e.explanation}")
 
 
 def derive_fernet_key(salt: str) -> bytes:
@@ -73,7 +190,7 @@ def derive_fernet_key(salt: str) -> bytes:
         length=32,
         salt=salt.encode(),
         iterations=390_000,
-        backend=default_backend()
+        backend=default_backend(),
     )
     return base64.urlsafe_b64encode(kdf.derive(master))
 
@@ -172,6 +289,20 @@ async def run_form(request: Request, user: User = Depends(get_current_user)):
     )
 
 
+def create_temp_docker_config(username: str, token: str):
+    temp_dir = tempfile.TemporaryDirectory()
+    config_path = Path(temp_dir.name) / "config.json"
+    auth = base64.b64encode(f"{username}:{token}".encode()).decode()
+    config_path.write_text(json.dumps({
+        "auths": {
+            "https://index.docker.io/v1/": {
+                "auth": auth
+            }
+        }
+    }))
+    return temp_dir
+
+
 @router.post("/run", response_class=HTMLResponse)
 async def run_submit(
         request: Request,
@@ -232,9 +363,22 @@ async def run_submit(
                 raise ValueError(f"Path not found: {host_path}")
             volumes_map[host_path.as_posix()] = {"bind": cont_path, "mode": mode}
 
+        login_performed = False
+        try:
+            docker_client.images.pull(image)  # публичная картинка?
+        except docker.errors.APIError as e:
+            if "pull access denied" in str(e).lower():
+                creds = await DockerHubCredential.get_or_none(user=user)
+                if not creds:
+                    raise HTTPException(403, "Private image, login required")
+
+                await _pull_with_auth(image, creds)  # ← вставляем точечную авторизацию
+            else:
+                raise
+
         docker_client.containers.run(
             image,
-            name=name,
+            name=f"{name}_u{user.id}",
             detach=True,
             mem_limit=mem_limit,
             cpu_quota=cpu_quota,
@@ -243,6 +387,12 @@ async def run_submit(
             environment=env_map or None,
             volumes=volumes_map or None,
         )
+
+        if login_performed:
+            try:
+                docker_client.logout()  # удаляет токен из ~/.docker/config.json
+            except Exception as logout_error:
+                logger.warning(f"Docker logout failed: {logout_error}")
 
         return RedirectResponse("/stacks/", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -314,7 +464,37 @@ async def compose_submit(
 
     # запускаем как новый стек
     try:
-        result = await api_run_compose(
+        parsed = yaml.safe_load(content)
+        if "services" in parsed:
+            for svc in parsed["services"].values():
+                if "container_name" in svc and isinstance(svc["container_name"], str):
+                    svc["container_name"] = f"{svc['container_name']}_u{user.id}"
+        content = yaml.dump(parsed)
+    except Exception as e:
+        return templates.TemplateResponse(
+            "compose.html",
+            {
+                "request": request,
+                "error": f"YAML processing error: {e}",
+                "compose_text": content,
+            },
+        )
+    creds = await DockerHubCredential.get_or_none(user=user)
+    if creds:
+        try:
+            docker_client.login(username=creds.username, password=creds.token)
+        except docker.errors.APIError as e:
+            return templates.TemplateResponse(
+                "compose.html",
+                {
+                    "request": request,
+                    "error": f"Docker Hub login failed: {e.explanation}",
+                    "compose_text": content,
+                },
+            )
+
+    try:
+        await api_run_compose(
             ComposeSpec(compose_yaml=content), user, existing_stack_id=stack_id
         )
     except HTTPException as e:
@@ -571,15 +751,18 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
     dbs = await UserDatabase.filter(owner=user).order_by("created_at")
     count = len(dbs)
 
-    return templates.TemplateResponse("databases.html", {
-        "request": request,
-        "databases": dbs,
-        "new_db": new_db,
-        "db_error": db_error,
-        "db_success": db_success,
-        "count": count,
-        "max": int(MAX_DB_PER_USER),
-    })
+    return templates.TemplateResponse(
+        "databases.html",
+        {
+            "request": request,
+            "databases": dbs,
+            "new_db": new_db,
+            "db_error": db_error,
+            "db_success": db_success,
+            "count": count,
+            "max": int(MAX_DB_PER_USER),
+        },
+    )
 
 
 @router.post("/databases/create", response_class=HTMLResponse)
@@ -593,7 +776,9 @@ async def create_database(
     # ограничение по количеству
     if await UserDatabase.filter(owner=user).count() >= 3:
         request.session["db_error"] = "You have reached the limit of 3 databases"
-        return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            "/stacks/databases", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     # уникальный суффикс для имени
     suffix = f"_u{user.id}"
@@ -617,19 +802,18 @@ async def create_database(
             host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
             port=int(os.getenv("PGDB_USER_PORT", 5432)),
         )
-        await conn.execute(f'CREATE USER "{db_user}" WITH PASSWORD \'{raw_password}\';')
+        await conn.execute(f"CREATE USER \"{db_user}\" WITH PASSWORD '{raw_password}';")
         await conn.execute(f'CREATE DATABASE "{db_name}" OWNER "{db_user}";')
         await conn.close()
     except Exception as e:
         request.session["db_error"] = f"Postgres error: {e}"
-        return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            "/stacks/databases", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     # сохраняем только зашифрованный пароль
     db = await UserDatabase.create(
-        name=db_name,
-        owner=user,
-        db_user=db_user,
-        db_password_encrypted=encrypted
+        name=db_name, owner=user, db_user=db_user, db_password_encrypted=encrypted
     )
 
     # кладём в сессию одноразово
@@ -638,7 +822,7 @@ async def create_database(
         "name": db_name,
         "db_user": db_user,
         "password": raw_password,
-        "salt": salt
+        "salt": salt,
     }
 
     return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
@@ -670,22 +854,26 @@ async def reveal_database(
         f = get_fernet_for_salt(salt)
         raw = f.decrypt(db.db_password_encrypted.encode()).decode()
     except Exception:
-        return JSONResponse({"success": False, "error": "Invalid salt or decryption failed"})
+        return JSONResponse(
+            {"success": False, "error": "Invalid salt or decryption failed"}
+        )
 
     return JSONResponse({"success": True, "password": raw})
 
 
 @router.post("/databases/{db_id}/delete")
 async def delete_database(
-    db_id: int,
-    request: Request,
-    user: User = Depends(get_current_user),
+        db_id: int,
+        request: Request,
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
     db = await UserDatabase.get_or_none(id=db_id, owner=user)
     if not db:
         request.session["db_error"] = "Database not found"
-        return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            "/stacks/databases", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     try:
         conn = await asyncpg.connect(
@@ -693,7 +881,7 @@ async def delete_database(
             password=os.getenv("POSTGRES_USER_PASSWORD"),
             database=os.getenv("POSTGRES_USER_DB", "postgres"),
             host=os.getenv("PGDB_USER_HOST", "pgdb_user"),
-            port=int(os.getenv("PGDB_USER_PORT", 5432)),
+            port=int(os.geenv("PGDB_USER_PORT", 5432)),
         )
         await conn.execute(f'DROP DATABASE IF EXISTS "{db.name}";')
         await conn.execute(f'DROP USER IF EXISTS "{db.db_user}";')
@@ -766,9 +954,16 @@ async def fs_download(path: str, user: User = Depends(get_current_user)):
 @router.get("/dockerhub", response_class=HTMLResponse)
 async def dockerhub_auth_form(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
+
+    creds = await DockerHubCredential.get_or_none(user=user)
+    dockerhub_user = creds.username if creds else None
+
     return templates.TemplateResponse(
         "dockerhub_login.html",
-        {"request": request, "dockerhub_user": request.session.get("dockerhub_user")},
+        {
+            "request": request,
+            "dockerhub_user": dockerhub_user,
+        },
     )
 
 
@@ -780,20 +975,13 @@ async def dockerhub_auth_submit(
         user: User = Depends(get_current_user),
 ):
     await check_access(user)
-    docker_client = docker.from_env()
-    try:
-        docker_client.login(
-            username=username, password=token, registry="https://index.docker.io/v1/"
-        )
-    except docker.errors.APIError as e:
-        return templates.TemplateResponse(
-            "dockerhub_login.html",
-            {
-                "request": request,
-                "error": f"Failed to authenticate: {e.explanation}",
-                "dockerhub_user": None,
-            },
-        )
 
+    # Просто сохраняем или обновляем креденшлы
+    await DockerHubCredential.update_or_create(
+        {"username": username, "token": token}, user=user
+    )
+
+    # Обновим имя в UI (необязательно)
     request.session["dockerhub_user"] = username
-    return RedirectResponse("/stacks//dockerhub", status_code=303)
+
+    return RedirectResponse("/stacks/dockerhub", status_code=303)

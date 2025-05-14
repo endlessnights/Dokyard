@@ -11,7 +11,7 @@
   </style>
   {% block head %}{% endblock %}
 </head>
-<body class="bg-gray-50 text-gray-800 antialiased" data-lang="ru">
+<body class="bg-gray-50 text-gray-800 antialiased min-h-screen flex flex-col" data-lang="ru">
 
   <!-- HEADER -->
   <header class="bg-white shadow">
@@ -23,7 +23,7 @@
           <span class="lang-en hidden">Home</span>
         </a>
 
-        {% if user_group != "guest" %}
+        {% if user_group != "Guest" %}
           <a href="/stacks" class="hover:text-accent">
             <span class="lang-ru">Контейнеры</span>
             <span class="lang-en hidden">Stacks</span>
@@ -31,6 +31,10 @@
           <a href="/stacks/databases" class="hover:text-accent">
             <span class="lang-ru">Базы данных</span>
             <span class="lang-en hidden">Databases</span>
+          </a>
+          <a href="/stacks/images" class="hover:text-accent">
+            <span class="lang-ru">Образы</span>
+            <span class="lang-en hidden">Images</span>
           </a>
           <a href="/logout" class="hover:text-accent">
             <span class="lang-ru">Выйти</span>
@@ -56,7 +60,7 @@
   </header>
 
   <!-- MAIN CONTENT -->
-  <main class="container mx-auto px-6 py-10">
+  <main class="container mx-auto px-6 py-10 flex-grow">
     {% block content %}{% endblock %}
   </main>
 

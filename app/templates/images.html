@@ -1,57 +1,53 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <title>Your Images</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 p-6">
-  <div class="max-w-5xl mx-auto bg-white p-6 shadow rounded">
-    <h1 class="text-2xl font-bold mb-4">Your Images</h1>
+{% extends "base.html" %}
+{% block title %}Ваши образы — Dokyard{% endblock %}
 
-    {% if error %}
-      <div class="bg-red-100 text-red-800 p-3 rounded mb-4">{{ error }}</div>
-    {% endif %}
+{% block content %}
+<div class="max-w-5xl mx-auto bg-white p-6 shadow rounded space-y-6">
+  <h1 class="text-2xl font-bold mb-4">Your Images</h1>
 
-    <table class="w-full table-auto border-collapse">
-      <thead>
-        <tr class="bg-gray-200">
-          <th class="border px-2 py-1">Repository:Tag</th>
-          <th class="border px-2 py-1">Image ID</th>
-          <th class="border px-2 py-1">Size</th>
-          <th class="border px-2 py-1">Created</th>
-          <th class="border px-2 py-1">Status</th>
-          <th class="border px-2 py-1">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for img in images %}
-        <tr>
-          <td class="border px-2 py-1">{{ img.tags | join(", ") }}</td>
-          <td class="border px-2 py-1 font-mono text-sm">{{ img.id[:16] }}</td>
-          <td class="border px-2 py-1">{{ img.size_mb }} MB</td>
-          <td class="border px-2 py-1">
-  <span class="created" data-iso="{{ img.created_iso }}"></span>
-</td>
-          <td class="border px-2 py-1">{{ img.status }}</td>
-          <td class="border px-2 py-1">
-            <form class="inline" action="/stacks/images/{{ img.id }}/remove" method="post">
-              <button class="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600">
-                Remove
-              </button>
-            </form>
-          </td>
-        </tr>
-      {% else %}
-        <tr><td colspan="6" class="text-center py-4">No images found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  {% if error %}
+    <div class="bg-red-100 text-red-800 p-3 rounded mb-4">{{ error }}</div>
+  {% endif %}
 
-    <div class="mt-4">
-      <a href="/ui" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">← Back to Containers</a>
-    </div>
-  </div>
+  <table class="w-full table-auto border-collapse">
+    <thead>
+      <tr class="bg-gray-200">
+        <th class="border px-2 py-1">Repository:Tag</th>
+        <th class="border px-2 py-1">Image ID</th>
+        <th class="border px-2 py-1">Size</th>
+        <th class="border px-2 py-1">Created</th>
+        <th class="border px-2 py-1">Status</th>
+        <th class="border px-2 py-1">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for img in images %}
+      <tr>
+        <td class="border px-2 py-1">{{ img.tags | join(", ") }}</td>
+        <td class="border px-2 py-1 font-mono text-sm">{{ img.id[:16] }}</td>
+        <td class="border px-2 py-1">{{ img.size_mb }} MB</td>
+        <td class="border px-2 py-1">
+          <span class="created" data-iso="{{ img.created_iso }}"></span>
+        </td>
+        <td class="border px-2 py-1">{{ img.status }}</td>
+        <td class="border px-2 py-1">
+          <form class="inline" action="/stacks/images/{{ img.id }}/remove" method="post">
+            <button class="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600">
+              Remove
+            </button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="text-center py-4">No images found.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <a href="/stacks/dockerhub" class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">Docker Hub Login</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
 <script>
   document.querySelectorAll(".created").forEach(el => {
     const iso = el.dataset.iso;
@@ -68,5 +64,4 @@
     el.textContent = formatted;
   });
 </script>
-</body>
-</html>
+{% endblock %}
