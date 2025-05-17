@@ -15,9 +15,10 @@
   {% if new_db %}
     <div class="p-4 bg-green-50 text-green-900 rounded">
       <h2 class="font-semibold mb-2">New Database Created!</h2>
-      <p><strong>Name:</strong> {{ new_db.name }}</p>
-      <p><strong>User:</strong> <code>{{ new_db.db_user }}</code></p>
-      <p><strong>Password:</strong> <code>{{ new_db.password }}</code></p>
+      <p><strong>DB Host:</strong> dokyard_user</p>
+      <p><strong>DB Name:</strong> {{ new_db.name }}</p>
+      <p><strong>DB User:</strong> <code>{{ new_db.db_user }}</code></p>
+      <p><strong>DB Password:</strong> <code>{{ new_db.password }}</code></p>
       <p><strong>Salt:</strong> <code>{{ new_db.salt }}</code></p>
       <p class="text-sm text-gray-600">Save these now—credentials won’t be shown again without this salt.</p>
     </div>
@@ -68,6 +69,29 @@
     </form>
   </div>
 </div>
+{% if user.pgadmin_login %}
+  <a href="http://localhost:5050/" target="_blank"
+     class="inline-block bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">
+     Open pgAdmin
+  </a>
+{% else %}
+  <form action="/stacks/databases/pgadmin/create" method="post" class="inline">
+    <button type="submit"
+            class="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">
+      Create pgAdmin account
+    </button>
+  </form>
+{% endif %}
+  {% if pgadmin_info %}
+    <div class="p-4 bg-blue-50 text-blue-900 rounded space-y-1">
+      <h2 class="font-semibold mb-2">New pgAdmin Account Created!</h2>
+      <p><strong>Login (email):</strong> {{ pgadmin_info.login }}</p>
+      <p><strong>Password:</strong> <code>{{ pgadmin_info.password }}</code></p>
+      <p><strong>Salt:</strong> <code>{{ pgadmin_info.salt }}</code></p>
+      <p class="text-sm text-gray-600">Save these now—credentials won’t be shown again without this salt.</p>
+    </div>
+  {% endif %}
+
 {% endblock %}
 
 {% block scripts %}

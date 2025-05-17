@@ -23,6 +23,8 @@ class User(models.Model):
     hashed_password = fields.CharField(max_length=128)
     is_active = fields.BooleanField(default=True)
     registration_date = fields.DatetimeField(default=datetime.utcnow)
+    pgadmin_login = fields.CharField(max_length=120, null=True)
+    pgadmin_password = fields.CharField(max_length=128, null=True)
     groups: fields.ManyToManyRelation[Group]
 
     def __str__(self):

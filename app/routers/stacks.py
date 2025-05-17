@@ -7,8 +7,10 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import subprocess
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -21,6 +23,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from docker.errors import APIError, NotFound
 from fastapi import (APIRouter, Body, Depends, File, Form, HTTPException,
                      Request, UploadFile, status)
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -230,11 +233,27 @@ async def check_access(user: User):
         raise HTTPException(status_code=403, detail="Permission denied")
 
 
-def get_home_base(user: User) -> Path:
-    if platform.system() == "Windows":
-        return Path(r"C:\Users\baymu\PycharmProjects\clubdocker\cli\tmp").resolve()
-    else:
-        return (Path("/home/clubdocker") / user.username).resolve()
+HOME_ROOT = Path(r"C:\Users\baymu\PycharmProjects\clubdocker\home")
+
+
+def get_user_root(user: User = Depends(get_current_user)) -> Path:
+    """
+    Домашняя директория ТОЛЬКО на локальной Windows-машине.
+    Создаётся при первом запросе.
+    """
+    root = HOME_ROOT / user.username
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def safe_path(root: Path, rel: str) -> Path:
+    """
+    Проверка, что целевой путь остаётся внутри root.
+    """
+    p = (root / rel).resolve()
+    if not str(p).startswith(str(root)):
+        raise HTTPException(400, "Invalid path")
+    return p
 
 
 def get_used_host_ports() -> set:
@@ -742,11 +761,11 @@ async def ui_remove_image(
 @router.get("/databases", response_class=HTMLResponse)
 async def databases_ui(request: Request, user: User = Depends(get_current_user)):
     await check_access(user)
-    # one-time creation info
     new_db = request.session.pop("new_db", None)
-    # any error/success messages
     db_error = request.session.pop("db_error", None)
     db_success = request.session.pop("db_success", None)
+    # Вот новая строка:
+    pgadmin_info = request.session.pop("pgadmin_info", None)
 
     dbs = await UserDatabase.filter(owner=user).order_by("created_at")
     count = len(dbs)
@@ -755,14 +774,70 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
         "databases.html",
         {
             "request": request,
+            "user": user,
             "databases": dbs,
             "new_db": new_db,
             "db_error": db_error,
             "db_success": db_success,
+            "pgadmin_info": pgadmin_info,
             "count": count,
             "max": int(MAX_DB_PER_USER),
         },
     )
+
+
+@router.post("/databases/pgadmin/create")
+async def create_pgadmin_user(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    await check_access(user)
+    if user.pgadmin_login:
+        raise HTTPException(400, "pgAdmin account already exists")
+
+    # 1) Генерим логин и пароль
+    login    = f"{user.username}@example.com"
+    password = secrets.token_urlsafe(12)
+    salt     = secrets.token_hex(8)
+
+    # 2) Берём контейнер pgAdmin
+    try:
+        pgc = docker_client.containers.get("dokyard_pgadmin")
+    except NotFound:
+        raise HTTPException(500, "pgAdmin container not found")
+
+    # 3) Запускаем add-user через абсолютный путь
+    cmd = [
+        "/venv/bin/python3",
+        "setup.py",
+        "add-user",
+        login,
+        password,
+        "--role", "User",
+    ]
+    try:
+        result = pgc.exec_run(cmd, user="root")
+    except APIError as e:
+        raise HTTPException(500, f"Docker exec error: {e.explanation}")
+
+    if result.exit_code != 0:
+        err = (result.output or b"").decode(errors="ignore")
+        raise HTTPException(500, f"pgAdmin add-user failed:\n{err}")
+
+    # 4) Сохраняем в БД (шифруем пароль)
+    user.pgadmin_login    = login
+    user.pgadmin_password = get_fernet().encrypt(password.encode()).decode()
+    await user.save()
+
+    # 5) Кладём в сессию, чтобы сразу показать на UI
+    request.session["pgadmin_info"] = {
+        "login":    login,
+        "password": password,
+        "salt":     salt,
+    }
+    request.session["db_success"] = "pgAdmin account created"
+
+    return RedirectResponse("/stacks/databases", status_code=303)
 
 
 @router.post("/databases/create", response_class=HTMLResponse)
@@ -926,60 +1001,85 @@ async def delete_database(
 
 
 @router.get("/fs", response_class=HTMLResponse)
-async def fs_browser(
-        request: Request, path: str = "", user: User = Depends(get_current_user)
-):
-    await check_access(user)
-    base = get_home_base(user)
-    target = (base / path).resolve()
-    if not str(target).startswith(str(base)):
-        raise HTTPException(400, detail="Invalid path")
-    if not target.exists():
-        raise HTTPException(404, detail="Not found")
+async def fs_page(request: Request):
+    """
+    Страница с простым JS-интерфейсом для работы с /fs/list, /fs/upload и т.д.
+    """
+    return templates.TemplateResponse("fs.html", {"request": request})
 
+
+@router.get("/fs/list")
+async def list_dir(path: str = "", root: Path = Depends(get_user_root)):
+    base = safe_path(root, path)
     entries = []
-    for p in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-        entries.append(
-            {
-                "name": p.name,
-                "is_dir": p.is_dir(),
-                "rel": p.relative_to(base).as_posix(),
-            }
-        )
-
-    current = Path(path).as_posix().rstrip("/")
-    return templates.TemplateResponse(
-        "fs_browser.html", {"request": request, "entries": entries, "current": current}
-    )
+    for child in sorted(base.iterdir(), key=lambda p: p.is_file()):
+        entries.append({
+            "name": child.name,
+            "is_dir": child.is_dir(),
+            "rel": str((Path(path) / child.name).as_posix())
+        })
+    return {"cwd": path, "entries": entries}
 
 
 @router.post("/fs/upload")
-async def fs_upload(
-        path: str = Form(""),
+async def upload_file(
+        path: str = Form(...),
         file: UploadFile = File(...),
-        user: User = Depends(get_current_user),
+        root: Path = Depends(get_user_root)
 ):
-    await check_access(user)
-    base = get_home_base(user)
-    dest_dir = (base / path).resolve()
-    if not dest_dir.is_dir() or not str(dest_dir).startswith(str(base)):
-        raise HTTPException(400, detail="Invalid upload directory")
-    dest = dest_dir / file.filename
-    with open(dest, "wb") as f:
-        f.write(await file.read())
-    return RedirectResponse(
-        f"/stacks//fs?path={path}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    dest = safe_path(root, path) / file.filename
+    with open(dest, "wb") as out:
+        shutil.copyfileobj(file.file, out)
+    # если это zip и хотим сразу распаковать:
+    if dest.suffix.lower() == ".zip":
+        with zipfile.ZipFile(dest, 'r') as z:
+            z.extractall(safe_path(root, path))
+    return JSONResponse({"success": True})
+
+
+@router.post("/fs/rename")
+async def rename(
+        src: str = Form(...), dst: str = Form(...),
+        root: Path = Depends(get_user_root)
+):
+    s = safe_path(root, src)
+    d = safe_path(root, dst)
+    s.rename(d)
+    return {"success": True}
+
+
+@router.post("/fs/move")
+async def move(
+        src: str = Form(...), dst_dir: str = Form(...),
+        root: Path = Depends(get_user_root)
+):
+    s = safe_path(root, src)
+    d = safe_path(root, dst_dir) / s.name
+    s.replace(d)
+    return {"success": True}
+
+
+@router.post("/fs/delete")
+async def delete(path: str = Form(...), root: Path = Depends(get_user_root)):
+    target = safe_path(root, path)
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return {"success": True}
 
 
 @router.get("/fs/download")
-async def fs_download(path: str, user: User = Depends(get_current_user)):
-    await check_access(user)
-    base = get_home_base(user)
-    target = (base / path).resolve()
-    if not str(target).startswith(str(base)) or not target.is_file():
-        raise HTTPException(400, detail="Invalid file")
-    return FileResponse(str(target), filename=target.name)
+async def download(path: str, root: Path = Depends(get_user_root)):
+    file = safe_path(root, path)
+    if file.is_dir():
+        # упаковать в zip на лету
+        zip_path = root / f"tmp_{file.name}.zip"
+        with zipfile.ZipFile(zip_path, 'w') as z:
+            for p in file.rglob('*'):
+                z.write(p, p.relative_to(file.parent))
+        return FileResponse(zip_path, filename=f"{file.name}.zip")
+    return FileResponse(file, filename=file.name)
 
 
 @router.get("/dockerhub", response_class=HTMLResponse)

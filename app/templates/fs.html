@@ -1,0 +1,104 @@
+<!-- app/templates/fs.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Manager</title>
+  <style>
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 4px; }
+    th { background: #eee; }
+    a { text-decoration: none; }
+    button { margin: 0 4px; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <!-- note the id="uploader" and multiple -->
+    <input type="file" id="uploader" multiple>
+    <!-- give reload its own id, too -->
+    <button id="reloadBtn">Reload</button>
+  </div>
+  <table id="files">
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>Actions</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- script goes at the end, after the DOM -->
+  <script>
+    let cwd = "";
+
+    // 1) On page‐load, fetch listing
+    window.addEventListener("load", reload);
+
+    // 2) Hook our reload button
+    document.getElementById("reloadBtn")
+      .addEventListener("click", reload);
+
+    // 3) Hook uploads
+    document.getElementById("uploader")
+      .addEventListener("change", async e => {
+        const files = e.target.files;
+        const form = new FormData();
+        form.append("path", cwd);
+        for (let f of files) form.append("file", f);
+        await fetch("/stacks/fs/upload", { method: "POST", body: form });
+        reload();
+      });
+
+    async function reload() {
+      const res = await fetch(`/stacks/fs/list?path=${encodeURIComponent(cwd)}`);
+      if (!res.ok) return console.error("list failed", await res.text());
+      const js = await res.json();
+      cwd = js.cwd;
+      const tbody = document.querySelector("#files tbody");
+      tbody.innerHTML = "";
+      for (const e of js.entries) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>
+            ${e.is_dir
+              ? `<a href="#" onclick="cd('${e.rel}');return false;">${e.name}</a>`
+              : e.name}
+          </td>
+          <td>${e.is_dir ? "dir" : "file"}</td>
+          <td>
+            <button onclick="download('${e.rel}')">⇩</button>
+            <button onclick="del('${e.rel}')">✕</button>
+            <button onclick="promptRename('${e.rel}')">✎</button>
+          </td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function cd(rel) {
+      cwd = rel;
+      reload();
+    }
+
+    async function del(rel) {
+      const form = new FormData();
+      form.append("path", rel);
+      await fetch("/stacks/fs/delete", { method: "POST", body: form });
+      reload();
+    }
+
+    async function promptRename(rel) {
+      const name = prompt("New name:", rel.split("/").pop());
+      if (!name) return;
+      const dst = rel.split("/").slice(0, -1).concat(name).join("/");
+      const form = new FormData();
+      form.append("src", rel);
+      form.append("dst", dst);
+      await fetch("/stacks/fs/rename", { method: "POST", body: form });
+      reload();
+    }
+
+    function download(rel) {
+      window.location = `/stacks/fs/download?path=${encodeURIComponent(rel)}`;
+    }
+  </script>
+</body>
+</html>
