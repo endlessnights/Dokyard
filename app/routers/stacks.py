@@ -676,10 +676,107 @@ async def images_ui(request: Request, user: User = Depends(get_current_user)):
                 "status": status,
             }
         )
+    new_gitea = request.session.pop("gitea_info", None)
 
     return templates.TemplateResponse(
-        "images.html", {"request": request, "images": images}
+        "images.html", {
+            "request": request,
+            "user": user,
+            "images": images,
+            "GITEA_DOMAIN": os.getenv("GITEA_DOMAIN"),
+            "new_gitea": new_gitea,
+        }
     )
+
+
+GITEA_API_URL = os.getenv("GITEA_API_URL", "http://gitea:3000")
+
+
+@router.post("/images/gitea/create")
+async def create_gitea_user(
+        request: Request,
+        user: User = Depends(get_current_user),
+):
+    await check_access(user)
+    if user.gitea_login:
+        raise HTTPException(400, "Gitea account already exists")
+
+    # ─── 1. Генерируем учётку ──────────────────────────────────────────────
+    login = user.username
+    email = f"{login}@example.com"
+    password = secrets.token_urlsafe(16)
+
+    # ─── 2. Конфигурация Gitea API  (внутренний адрес!) ───────────────────
+    api_base = os.getenv("GITEA_API_URL", "http://gitea:3000")  # ⬅ ключевое
+    admin_token = os.getenv("GITEA_ADMIN_TOKEN")
+    if not admin_token:
+        raise HTTPException(500, "GITEA_ADMIN_TOKEN is not set")
+
+    headers = {
+        "Authorization": f"token {admin_token}",
+        "Accept": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(base_url=api_base, timeout=10.0) as client:
+            # 3-а. Создаём пользователя
+            resp = await client.post(
+                "/api/v1/admin/users",
+                json={
+                    "email": email,
+                    "username": login,
+                    "login_name": login,
+                    "password": password,
+                    "must_change_password": False,
+                    "send_notify": False,
+                    "restricted": False,
+                    "visibility": "public",
+                },
+                headers=headers,
+            )
+            if resp.status_code != 201:
+                raise HTTPException(
+                    500,
+                    f"Gitea create-user error: {resp.status_code} {resp.text}"
+                )
+
+            # 3-б. Генерируем PAT (нужен Basic-Auth от лица созданного юзера)
+            token_resp = await client.post(
+                f"/api/v1/users/{login}/tokens",
+                json={"name": "docker-registry",
+                      "scopes": ["packages:read", "packages:write"]},
+                auth=(login, password),  # BasicAuth
+            )
+            if token_resp.status_code != 201:
+                raise HTTPException(
+                    500,
+                    f"Gitea token error: {token_resp.status_code} {token_resp.text}"
+                )
+
+            token = token_resp.json().get("sha1")
+            if not token:
+                raise HTTPException(500, "Failed to parse PAT from Gitea")
+    except httpx.ConnectError:
+        raise HTTPException(
+            500,
+            "Cannot connect to Gitea API. "
+            "Проверьте, что api_base=http://gitea:3000 доступен из контейнера."
+        )
+
+    # ─── 4. Сохраняем логин и зашифрованный токен ─────────────────────────
+    user.gitea_login = login
+    user.gitea_token = get_fernet().encrypt(token.encode()).decode()
+    await user.save()
+
+    # ─── 5. Передаём данные во flash-сообщении для UI ─────────────────────
+    request.session["gitea_info"] = {
+        "login": login,
+        "password": password,
+        "token": token,
+    }
+    request.session["db_success"] = "Gitea account created"
+
+    return RedirectResponse("/stacks/images", status_code=303)
 
 
 @router.post("/images/{image_id}/remove")
@@ -788,17 +885,17 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
 
 @router.post("/databases/pgadmin/create")
 async def create_pgadmin_user(
-    request: Request,
-    user: User = Depends(get_current_user),
+        request: Request,
+        user: User = Depends(get_current_user),
 ):
     await check_access(user)
     if user.pgadmin_login:
         raise HTTPException(400, "pgAdmin account already exists")
 
     # 1) Генерим логин и пароль
-    login    = f"{user.username}@example.com"
+    login = f"{user.username}@example.com"
     password = secrets.token_urlsafe(12)
-    salt     = secrets.token_hex(8)
+    salt = secrets.token_hex(8)
 
     # 2) Берём контейнер pgAdmin
     try:
@@ -825,15 +922,15 @@ async def create_pgadmin_user(
         raise HTTPException(500, f"pgAdmin add-user failed:\n{err}")
 
     # 4) Сохраняем в БД (шифруем пароль)
-    user.pgadmin_login    = login
+    user.pgadmin_login = login
     user.pgadmin_password = get_fernet().encrypt(password.encode()).decode()
     await user.save()
 
     # 5) Кладём в сессию, чтобы сразу показать на UI
     request.session["pgadmin_info"] = {
-        "login":    login,
+        "login": login,
         "password": password,
-        "salt":     salt,
+        "salt": salt,
     }
     request.session["db_success"] = "pgAdmin account created"
 
@@ -998,88 +1095,6 @@ async def delete_database(
         request.session["db_error"] = f"Error deleting database: {e}"
 
     return RedirectResponse("/stacks/databases", status_code=status.HTTP_303_SEE_OTHER)
-
-
-@router.get("/fs", response_class=HTMLResponse)
-async def fs_page(request: Request):
-    """
-    Страница с простым JS-интерфейсом для работы с /fs/list, /fs/upload и т.д.
-    """
-    return templates.TemplateResponse("fs.html", {"request": request})
-
-
-@router.get("/fs/list")
-async def list_dir(path: str = "", root: Path = Depends(get_user_root)):
-    base = safe_path(root, path)
-    entries = []
-    for child in sorted(base.iterdir(), key=lambda p: p.is_file()):
-        entries.append({
-            "name": child.name,
-            "is_dir": child.is_dir(),
-            "rel": str((Path(path) / child.name).as_posix())
-        })
-    return {"cwd": path, "entries": entries}
-
-
-@router.post("/fs/upload")
-async def upload_file(
-        path: str = Form(...),
-        file: UploadFile = File(...),
-        root: Path = Depends(get_user_root)
-):
-    dest = safe_path(root, path) / file.filename
-    with open(dest, "wb") as out:
-        shutil.copyfileobj(file.file, out)
-    # если это zip и хотим сразу распаковать:
-    if dest.suffix.lower() == ".zip":
-        with zipfile.ZipFile(dest, 'r') as z:
-            z.extractall(safe_path(root, path))
-    return JSONResponse({"success": True})
-
-
-@router.post("/fs/rename")
-async def rename(
-        src: str = Form(...), dst: str = Form(...),
-        root: Path = Depends(get_user_root)
-):
-    s = safe_path(root, src)
-    d = safe_path(root, dst)
-    s.rename(d)
-    return {"success": True}
-
-
-@router.post("/fs/move")
-async def move(
-        src: str = Form(...), dst_dir: str = Form(...),
-        root: Path = Depends(get_user_root)
-):
-    s = safe_path(root, src)
-    d = safe_path(root, dst_dir) / s.name
-    s.replace(d)
-    return {"success": True}
-
-
-@router.post("/fs/delete")
-async def delete(path: str = Form(...), root: Path = Depends(get_user_root)):
-    target = safe_path(root, path)
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
-    return {"success": True}
-
-
-@router.get("/fs/download")
-async def download(path: str, root: Path = Depends(get_user_root)):
-    file = safe_path(root, path)
-    if file.is_dir():
-        # упаковать в zip на лету
-        zip_path = root / f"tmp_{file.name}.zip"
-        with zipfile.ZipFile(zip_path, 'w') as z:
-            for p in file.rglob('*'):
-                z.write(p, p.relative_to(file.parent))
-        return FileResponse(zip_path, filename=f"{file.name}.zip")
-    return FileResponse(file, filename=file.name)
 
 
 @router.get("/dockerhub", response_class=HTMLResponse)

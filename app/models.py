@@ -25,6 +25,8 @@ class User(models.Model):
     registration_date = fields.DatetimeField(default=datetime.utcnow)
     pgadmin_login = fields.CharField(max_length=120, null=True)
     pgadmin_password = fields.CharField(max_length=128, null=True)
+    gitea_login = fields.CharField(max_length=120, null=True)
+    gitea_token = fields.CharField(max_length=256, null=True)
     groups: fields.ManyToManyRelation[Group]
 
     def __str__(self):
