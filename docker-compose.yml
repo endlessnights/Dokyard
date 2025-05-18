@@ -16,8 +16,8 @@ services:
       - pgdb_main
       - pgdb_user
 #      - gitea
-#    networks:
-#      - caddy_net
+    networks:
+      - caddy_net
 
   pgdb_main:
     image: postgres:17
@@ -33,8 +33,8 @@ services:
     env_file:
       - .env
     restart: always
-    #    networks:
-    #      - caddy_net
+    networks:
+      - caddy_net
 
   pgdb_user:
     image: postgres:17
@@ -50,8 +50,8 @@ services:
     env_file:
       - .env
     restart: always
-#    networks:
-#      - caddy_net
+    networks:
+      - caddy_net
 
   pgadmin:
       image: dpage/pgadmin4:latest
@@ -111,24 +111,24 @@ services:
 #    env_file:
 #      - .env
 
-#  caddy:
-#    image: caddy:latest
-#    container_name: caddy
-#    ports:
-#      - "80:80"
-#      - "443:443"
-#    volumes:
-#      - ./Caddyfile:/etc/caddy/Caddyfile
-#      - ./caddy_data:/data
-#      - ./caddy_config:/config
-#    environment:
-#      - CADDY_EMAIL=mail@devspond.pro
-#    networks:
-#      - caddy_net
-#
-#volumes:
-#  caddy_data:
-#  caddy_config:
-#
-#networks:
-#  caddy_net:
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+    environment:
+      - CADDY_EMAIL=test@example.com
+    networks:
+      - caddy_net
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  caddy_net:
