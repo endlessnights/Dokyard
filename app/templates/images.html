@@ -43,21 +43,21 @@
     {% endfor %}
     </tbody>
   </table>
-  <div class="mt-6">
-      {% if user.gitea_login %}
-        <a href="https://{{ GITEA_DOMAIN }}" target="_blank"
-           class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-          Open Gitea
-        </a>
-      {% else %}
-        <form action="/stacks/images/gitea/create" method="post" class="inline">
-          <button type="submit"
-                  class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-            Create Gitea Account
-          </button>
-        </form>
-      {% endif %}
-    </div>
+<!--  <div class="mt-6">-->
+<!--      {% if user.gitea_login %}-->
+<!--        <a href="https://{{ GITEA_DOMAIN }}" target="_blank"-->
+<!--           class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">-->
+<!--          Open Gitea-->
+<!--        </a>-->
+<!--      {% else %}-->
+<!--        <form action="/stacks/images/gitea/create" method="post" class="inline">-->
+<!--          <button type="submit"-->
+<!--                  class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">-->
+<!--            Create Gitea Account-->
+<!--          </button>-->
+<!--        </form>-->
+<!--      {% endif %}-->
+<!--    </div>-->
   <a href="/stacks/dockerhub" class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">Docker Hub Login</a>
   {% if new_gitea %}
   <div class="p-4 bg-blue-50 text-blue-900 rounded mb-4">

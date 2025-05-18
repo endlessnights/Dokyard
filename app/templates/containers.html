@@ -25,11 +25,11 @@
   {% if stack_id %}
   <div class="flex items-center space-x-3">
     <h2 class="text-xl font-semibold text-blue-700">Stack: {{ stack_id }}</h2>
-    <a href="/stacks/stack/{{ stack_id }}/edit" class="text-sm text-blue-500 underline hover:text-blue-700">Edit</a>
-    <form action="/stacks/stack/{{ stack_id }}/start" method="post" class="inline">
+    <a href="/stacks/{{ stack_id }}/edit" class="text-sm text-blue-500 underline hover:text-blue-700">Edit</a>
+    <form action="/stacks/{{ stack_id }}/start" method="post" class="inline">
       <button class="text-sm bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700" onclick="return confirm('Start all containers in stack {{ stack_id }}?')">▶ Start Stack</button>
     </form>
-    <form action="/stacks/stack/{{ stack_id }}/stop" method="post" class="inline">
+    <form action="/stacks/{{ stack_id }}/stop" method="post" class="inline">
       <button class="text-sm bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600" onclick="return confirm('Stop all containers in stack {{ stack_id }}?')">⏹ Stop Stack</button>
     </form>
   </div>

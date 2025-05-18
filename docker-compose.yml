@@ -15,7 +15,7 @@ services:
     depends_on:
       - pgdb_main
       - pgdb_user
-      - gitea
+#      - gitea
 #    networks:
 #      - caddy_net
 
@@ -70,46 +70,46 @@ services:
         - ./pgadmin_data:/var/lib/pgadmin
       restart: always
 
-  gitea-db:
-    image: postgres:16
-    container_name: dokyard_gitea_db
-    restart: always
-    environment:
-      POSTGRES_DB: gitea
-      POSTGRES_USER: gitea
-      POSTGRES_PASSWORD: gitea_pass
-    volumes:
-      - ./gitea_db:/var/lib/postgresql/data
-
-  gitea:
-    image: gitea/gitea:1.22.0-rootless  # версия с OCI-registry
-    container_name: dokyard_gitea
-    restart: always
-    depends_on: [ gitea-db ]
-    ports:
-      - "3000:3000"   # веб-UI
-      - "2222:22"     # git+ssh (необязательно, но удобно)
-    environment:
-      # — подключение к БД
-      - GITEA__DATABASE__DB_TYPE=postgres
-      - GITEA__DATABASE__HOST=gitea-db:5432
-      - GITEA__DATABASE__NAME=gitea
-      - GITEA__DATABASE__USER=gitea
-      - GITEA__DATABASE__PASSWD=gitea_pass
-
-      # — включаем пакеты и контейнеры
-      - GITEA__PACKAGES__ENABLED=true
-      - GITEA__PACKAGES__CONTAINERS__ENABLED=true
-      - GITEA__PACKAGES__CONTAINERS__ALLOWED_TYPES=docker,oci
-
-      # — URL вашего сервиса (важно для docker login)
-      - GITEA__SERVER__DOMAIN=${GITEA_DOMAIN}
-      - GITEA__SERVER__ROOT_URL=http://${GITEA_DOMAIN}/
-      - GITEA__SERVER__PROTOCOL=http
-    volumes:
-      - ./gitea_data:/data
-    env_file:
-      - .env
+#  gitea-db:
+#    image: postgres:16
+#    container_name: dokyard_gitea_db
+#    restart: always
+#    environment:
+#      POSTGRES_DB: gitea
+#      POSTGRES_USER: gitea
+#      POSTGRES_PASSWORD: gitea_pass
+#    volumes:
+#      - ./gitea_db:/var/lib/postgresql/data
+#
+#  gitea:
+#    image: gitea/gitea:1.22.0-rootless  # версия с OCI-registry
+#    container_name: dokyard_gitea
+#    restart: always
+#    depends_on: [ gitea-db ]
+#    ports:
+#      - "3000:3000"   # веб-UI
+#      - "2222:22"     # git+ssh (необязательно, но удобно)
+#    environment:
+#      # — подключение к БД
+#      - GITEA__DATABASE__DB_TYPE=postgres
+#      - GITEA__DATABASE__HOST=gitea-db:5432
+#      - GITEA__DATABASE__NAME=gitea
+#      - GITEA__DATABASE__USER=gitea
+#      - GITEA__DATABASE__PASSWD=gitea_pass
+#
+#      # — включаем пакеты и контейнеры
+#      - GITEA__PACKAGES__ENABLED=true
+#      - GITEA__PACKAGES__CONTAINERS__ENABLED=true
+#      - GITEA__PACKAGES__CONTAINERS__ALLOWED_TYPES=docker,oci
+#
+#      # — URL вашего сервиса (важно для docker login)
+#      - GITEA__SERVER__DOMAIN=${GITEA_DOMAIN}
+#      - GITEA__SERVER__ROOT_URL=http://${GITEA_DOMAIN}/
+#      - GITEA__SERVER__PROTOCOL=http
+#    volumes:
+#      - ./gitea_data:/data
+#    env_file:
+#      - .env
 
 #  caddy:
 #    image: caddy:latest

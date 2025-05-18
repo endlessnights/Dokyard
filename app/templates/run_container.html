@@ -23,12 +23,12 @@
     <div>
       <label class="block mb-1 font-medium">Memory Limit</label>
       <input name="mem_limit" class="w-full border rounded px-2 py-1"
-             value="{{ form_data.get('mem_limit', '512m') }}"/>
+             value="{{ form_data.get('mem_limit', '512m') }}" disabled/>
     </div>
     <div>
       <label class="block mb-1 font-medium">CPU Quota</label>
       <input name="cpu_quota" type="number" class="w-full border rounded px-2 py-1"
-             value="{{ form_data.get('cpu_quota', '50000') }}"/>
+             value="{{ form_data.get('cpu_quota', '50000') }}" disabled/>
     </div>
     <div>
       <label class="block mb-1 font-medium">Environment Variables <span class="text-sm text-gray-600">(KEY=VALUE, comma separated)</span></label>
@@ -41,11 +41,11 @@
              placeholder="8080:80,8443:443" value="{{ form_data.get('ports', '') }}"/>
       <p class="mt-1 text-sm text-gray-600">Used ports: {{ used_ports | join(", ") }}</p>
     </div>
-    <div>
-      <label class="block mb-1 font-medium">Volumes <span class="text-sm text-gray-600">(host:container[:mode])</span></label>
-      <input id="volumes-input" name="volumes" class="w-full border rounded px-2 py-1"
-             placeholder="logs:/var/log:ro" value="{{ form_data.get('volumes', '') }}"/>
-    </div>
+<!--    <div>-->
+<!--      <label class="block mb-1 font-medium">Volumes <span class="text-sm text-gray-600">(host:container[:mode])</span></label>-->
+<!--      <input id="volumes-input" name="volumes" class="w-full border rounded px-2 py-1"-->
+<!--             placeholder="logs:/var/log:ro" value="{{ form_data.get('volumes', '') }}"/>-->
+<!--    </div>-->
     <div class="flex space-x-2 pt-4">
       <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Run</button>
       <a href="/stacks" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">Cancel</a>

@@ -275,22 +275,31 @@ async def containers_ui(request: Request, user: User = Depends(get_current_user)
     await check_access(user)
     error = request.session.pop("error", None)
 
+    # ваши контейнеры
     containers = docker_client.containers.list(
         all=True, filters={"label": f"owner={user.id}"}
     )
     container_infos = []
     for c in containers:
         started_at = c.attrs["State"].get("StartedAt")
-        container_infos.append(
-            {
-                "object": c,
-                "started_at": started_at,
-                "running": c.attrs["State"].get("Running", False),
-            }
-        )
+        container_infos.append({
+            "object": c,
+            "started_at": started_at,
+            "running": c.attrs["State"].get("Running", False),
+        })
+
+    # вот тут — только реальные стеки из БД
+    known = await ComposeStack.filter(owner=user).values_list("stack_id", flat=True)
+    known_stacks = set(known)
+
     return templates.TemplateResponse(
         "containers.html",
-        {"request": request, "containers": container_infos, "error": error},
+        {
+            "request": request,
+            "containers": container_infos,
+            "error": error,
+            "known_stacks": known_stacks,
+        },
     )
 
 
@@ -327,14 +336,16 @@ async def run_submit(
         request: Request,
         image: str = Form(...),
         name: str = Form(...),
-        mem_limit: str = Form("512m"),
-        cpu_quota: int = Form(50000),
+        # mem_limit: str = Form("512m"),
+        # cpu_quota: int = Form(50000),
         ports: str = Form(""),
         envs: str = Form(""),
-        volumes: str = Form(""),
+        # volumes: str = Form(""),
         user: User = Depends(get_current_user),
 ):
     await check_access(user)
+    mem_limit = str(os.environ.get("mem_limit", "512m"))
+    cpu_quota = int(os.environ.get("cpu_quota", "50000"))
 
     form_data = {
         "image": image,
@@ -343,7 +354,7 @@ async def run_submit(
         "cpu_quota": str(cpu_quota),
         "ports": ports,
         "envs": envs,
-        "volumes": volumes,
+        # "volumes": volumes,
     }
 
     try:
@@ -367,20 +378,20 @@ async def run_submit(
             k, v = e.split("=", 1)
             env_map[k] = v
 
-        volumes_map = {}
-        for v in volumes.split(","):
-            v = v.strip()
-            if not v:
-                continue
-            parts = v.split(":", 2)
-            if len(parts) < 2:
-                raise ValueError(f"Invalid volume: {v}")
-            raw_host, cont_path = parts[0], parts[1]
-            mode = parts[2] if len(parts) == 3 else "rw"
-            host_path = Path(raw_host).expanduser().resolve()
-            if not host_path.exists():
-                raise ValueError(f"Path not found: {host_path}")
-            volumes_map[host_path.as_posix()] = {"bind": cont_path, "mode": mode}
+        # volumes_map = {}
+        # for v in volumes.split(","):
+        #     v = v.strip()
+        #     if not v:
+        #         continue
+        #     parts = v.split(":", 2)
+        #     if len(parts) < 2:
+        #         raise ValueError(f"Invalid volume: {v}")
+        #     raw_host, cont_path = parts[0], parts[1]
+        #     mode = parts[2] if len(parts) == 3 else "rw"
+        #     host_path = Path(raw_host).expanduser().resolve()
+        #     if not host_path.exists():
+        #         raise ValueError(f"Path not found: {host_path}")
+        #     volumes_map[host_path.as_posix()] = {"bind": cont_path, "mode": mode}
 
         login_performed = False
         try:
@@ -435,119 +446,117 @@ async def compose_form(request: Request, user: User = Depends(get_current_user))
 
 @router.post("/compose", response_class=HTMLResponse)
 async def compose_submit(
-        compose_file: UploadFile = File(None),
-        compose_text: str = Form(""),
-        stack_id: Optional[str] = Form(None),
-        request: Request = None,
-        user: User = Depends(get_current_user),
+    compose_file: UploadFile = File(None),
+    compose_text: str = Form(""),
+    stack_id: Optional[str] = Form(None),
+    request: Request = None,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
+    # чтение контента
     file_content = ""
     if compose_file and compose_file.filename:
         file_content = (await compose_file.read()).decode()
-
     content = file_content.strip() or compose_text.strip()
-
     if not content:
-        return templates.TemplateResponse(
-            "compose.html",
-            {
-                "request": request,
-                "error": "No compose file or text provided.",
-                "compose_text": compose_text,
-                "stack_id": stack_id,
-            },
-        )
+        return templates.TemplateResponse("compose.html", {
+            "request": request,
+            "error": "No compose file or text provided.",
+            "compose_text": compose_text,
+            "stack_id": stack_id,
+        })
 
-    # если стек редактируется — удаляем текущие контейнеры
+    # остановка/удаление при редактировании
     if stack_id:
         containers = docker_client.containers.list(
             all=True, filters={"label": f"stack_id={stack_id}"}
         )
         for ctr in containers:
-            try:
-                ctr.stop()
-            except:
-                pass
-            try:
-                ctr.remove(force=True)
-            except:
-                pass
-
-        # перезаписываем YAML
+            try: ctr.stop()
+            except: pass
+            try: ctr.remove(force=True)
+            except: pass
         stack = await ComposeStack.get_or_none(stack_id=stack_id, owner=user)
         if stack:
             stack.compose_yaml = content
             await stack.save()
 
-    # запускаем как новый стек
+    # парсим и удаляем volumes
     try:
         parsed = yaml.safe_load(content)
-        if "services" in parsed:
-            for svc in parsed["services"].values():
-                if "container_name" in svc and isinstance(svc["container_name"], str):
-                    svc["container_name"] = f"{svc['container_name']}_u{user.id}"
+        # убираем глобальные volumes
+        parsed.pop("volumes", None)
+        # убираем volumes в каждом сервисе
+        for svc in parsed.get("services", {}).values():
+            svc.pop("volumes", None)
+            # ваш существующий суффиксный код, если нужен
+            if "container_name" in svc and isinstance(svc["container_name"], str):
+                svc["container_name"] = f"{svc['container_name']}_u{user.id}"
         content = yaml.dump(parsed)
     except Exception as e:
-        return templates.TemplateResponse(
-            "compose.html",
-            {
-                "request": request,
-                "error": f"YAML processing error: {e}",
-                "compose_text": content,
-            },
-        )
+        return templates.TemplateResponse("compose.html", {
+            "request": request,
+            "error": f"YAML processing error: {e}",
+            "compose_text": content,
+        })
+
+    # авторизация и запуск
     creds = await DockerHubCredential.get_or_none(user=user)
     if creds:
         try:
             docker_client.login(username=creds.username, password=creds.token)
         except docker.errors.APIError as e:
-            return templates.TemplateResponse(
-                "compose.html",
-                {
-                    "request": request,
-                    "error": f"Docker Hub login failed: {e.explanation}",
-                    "compose_text": content,
-                },
-            )
+            return templates.TemplateResponse("compose.html", {
+                "request": request,
+                "error": f"Docker Hub login failed: {e.explanation}",
+                "compose_text": content,
+            })
 
     try:
         await api_run_compose(
             ComposeSpec(compose_yaml=content), user, existing_stack_id=stack_id
         )
     except HTTPException as e:
-        return templates.TemplateResponse(
-            "compose.html",
-            {
-                "request": request,
-                "error": e.detail,
-                "compose_text": content,
-            },
-        )
+        return templates.TemplateResponse("compose.html", {
+            "request": request,
+            "error": e.detail,
+            "compose_text": content,
+        })
 
     return RedirectResponse("/stacks/", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.get("/stacks/{stack_id}/edit", response_class=HTMLResponse)
+@router.get("/{stack_id}/edit", response_class=HTMLResponse)
 async def stack_edit(
-        stack_id: str, request: Request, user: User = Depends(get_current_user)
+    stack_id: str, request: Request, user: User = Depends(get_current_user)
 ):
     await check_access(user)
     stack = await ComposeStack.get_or_none(stack_id=stack_id, owner=user)
     if not stack:
-        raise HTTPException(404, "Stack not found")
-    return templates.TemplateResponse(
-        "compose.html",
-        {
-            "request": request,
-            "compose_text": stack.compose_yaml,
-            "stack_id": stack.stack_id,
-        },
-    )
+        stack = await ComposeStack.create(
+            stack_id=stack_id, owner=user, compose_yaml=""
+        )
+    compose_text = stack.compose_yaml or ""
+
+    try:
+        parsed = yaml.safe_load(compose_text)
+        parsed.pop("volumes", None)
+        for svc in parsed.get("services", {}).values():
+            svc.pop("volumes", None)
+        compose_text = yaml.dump(parsed)
+    except Exception:
+        # если не валидный YAML — отдадим как есть
+        pass
+
+    return templates.TemplateResponse("compose.html", {
+        "request": request,
+        "compose_text": compose_text,
+        "stack_id": stack.stack_id,
+    })
 
 
-@router.post("/stacks/{stack_id}/start")
+@router.post("/{stack_id}/start")
 async def ui_stack_start(stack_id: str, user: User = Depends(get_current_user)):
     await check_access(user)
     containers = docker_client.containers.list(
@@ -561,7 +570,7 @@ async def ui_stack_start(stack_id: str, user: User = Depends(get_current_user)):
     return RedirectResponse("/stacks/", status_code=303)
 
 
-@router.post("/stacks/{stack_id}/stop")
+@router.post("/{stack_id}/stop")
 async def ui_stack_stop(stack_id: str, user: User = Depends(get_current_user)):
     await check_access(user)
     containers = docker_client.containers.list(
