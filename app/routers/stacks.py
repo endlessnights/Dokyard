@@ -1,16 +1,11 @@
 # app/routers/stacks/.py
 import base64
-import io
 import json
 import logging
 import os
-import platform
 import re
 import secrets
-import shutil
-import subprocess
 import tempfile
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -24,12 +19,20 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from docker.errors import APIError, NotFound
-from fastapi import (APIRouter, Body, Depends, File, Form, HTTPException,
-                     Request, UploadFile, status)
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse
 
 from app.models import ComposeStack, DockerHubCredential, User, UserDatabase
 from app.routers.docker import ComposeSpec
@@ -173,10 +176,13 @@ async def _pull_with_auth(image: str, creds) -> None:
     (credstore/глобальный login не нужен).
     """
     try:
-        docker_client.images.pull(image, auth_config={
-            "username": creds.username,
-            "password": creds.token,
-        })
+        docker_client.images.pull(
+            image,
+            auth_config={
+                "username": creds.username,
+                "password": creds.token,
+            },
+        )
     except docker.errors.APIError as e:
         raise HTTPException(403, f"Pull failed: {e.explanation}")
 
@@ -227,8 +233,8 @@ async def is_user_in_group(user: User, group_name: str) -> bool:
 
 async def check_access(user: User):
     if not (
-            await is_user_in_group(user, "administrators")
-            or await is_user_in_group(user, "users")
+        await is_user_in_group(user, "administrators")
+        or await is_user_in_group(user, "users")
     ):
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -282,11 +288,13 @@ async def containers_ui(request: Request, user: User = Depends(get_current_user)
     container_infos = []
     for c in containers:
         started_at = c.attrs["State"].get("StartedAt")
-        container_infos.append({
-            "object": c,
-            "started_at": started_at,
-            "running": c.attrs["State"].get("Running", False),
-        })
+        container_infos.append(
+            {
+                "object": c,
+                "started_at": started_at,
+                "running": c.attrs["State"].get("Running", False),
+            }
+        )
 
     # вот тут — только реальные стеки из БД
     known = await ComposeStack.filter(owner=user).values_list("stack_id", flat=True)
@@ -321,27 +329,23 @@ def create_temp_docker_config(username: str, token: str):
     temp_dir = tempfile.TemporaryDirectory()
     config_path = Path(temp_dir.name) / "config.json"
     auth = base64.b64encode(f"{username}:{token}".encode()).decode()
-    config_path.write_text(json.dumps({
-        "auths": {
-            "https://index.docker.io/v1/": {
-                "auth": auth
-            }
-        }
-    }))
+    config_path.write_text(
+        json.dumps({"auths": {"https://index.docker.io/v1/": {"auth": auth}}})
+    )
     return temp_dir
 
 
 @router.post("/run", response_class=HTMLResponse)
 async def run_submit(
-        request: Request,
-        image: str = Form(...),
-        name: str = Form(...),
-        # mem_limit: str = Form("512m"),
-        # cpu_quota: int = Form(50000),
-        ports: str = Form(""),
-        envs: str = Form(""),
-        # volumes: str = Form(""),
-        user: User = Depends(get_current_user),
+    request: Request,
+    image: str = Form(...),
+    name: str = Form(...),
+    # mem_limit: str = Form("512m"),
+    # cpu_quota: int = Form(50000),
+    ports: str = Form(""),
+    envs: str = Form(""),
+    # volumes: str = Form(""),
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
     mem_limit = str(os.environ.get("mem_limit", "512m"))
@@ -415,7 +419,6 @@ async def run_submit(
             labels={"owner": str(user.id)},
             ports=ports_map or None,
             environment=env_map or None,
-            volumes=volumes_map or None,
         )
 
         if login_performed:
@@ -460,12 +463,15 @@ async def compose_submit(
         file_content = (await compose_file.read()).decode()
     content = file_content.strip() or compose_text.strip()
     if not content:
-        return templates.TemplateResponse("compose.html", {
-            "request": request,
-            "error": "No compose file or text provided.",
-            "compose_text": compose_text,
-            "stack_id": stack_id,
-        })
+        return templates.TemplateResponse(
+            "compose.html",
+            {
+                "request": request,
+                "error": "No compose file or text provided.",
+                "compose_text": compose_text,
+                "stack_id": stack_id,
+            },
+        )
 
     # остановка/удаление при редактировании
     if stack_id:
@@ -473,10 +479,14 @@ async def compose_submit(
             all=True, filters={"label": f"stack_id={stack_id}"}
         )
         for ctr in containers:
-            try: ctr.stop()
-            except: pass
-            try: ctr.remove(force=True)
-            except: pass
+            try:
+                ctr.stop()
+            except:
+                pass
+            try:
+                ctr.remove(force=True)
+            except:
+                pass
         stack = await ComposeStack.get_or_none(stack_id=stack_id, owner=user)
         if stack:
             stack.compose_yaml = content
@@ -495,11 +505,14 @@ async def compose_submit(
                 svc["container_name"] = f"{svc['container_name']}_u{user.id}"
         content = yaml.dump(parsed)
     except Exception as e:
-        return templates.TemplateResponse("compose.html", {
-            "request": request,
-            "error": f"YAML processing error: {e}",
-            "compose_text": content,
-        })
+        return templates.TemplateResponse(
+            "compose.html",
+            {
+                "request": request,
+                "error": f"YAML processing error: {e}",
+                "compose_text": content,
+            },
+        )
 
     # авторизация и запуск
     creds = await DockerHubCredential.get_or_none(user=user)
@@ -507,22 +520,28 @@ async def compose_submit(
         try:
             docker_client.login(username=creds.username, password=creds.token)
         except docker.errors.APIError as e:
-            return templates.TemplateResponse("compose.html", {
-                "request": request,
-                "error": f"Docker Hub login failed: {e.explanation}",
-                "compose_text": content,
-            })
+            return templates.TemplateResponse(
+                "compose.html",
+                {
+                    "request": request,
+                    "error": f"Docker Hub login failed: {e.explanation}",
+                    "compose_text": content,
+                },
+            )
 
     try:
         await api_run_compose(
             ComposeSpec(compose_yaml=content), user, existing_stack_id=stack_id
         )
     except HTTPException as e:
-        return templates.TemplateResponse("compose.html", {
-            "request": request,
-            "error": e.detail,
-            "compose_text": content,
-        })
+        return templates.TemplateResponse(
+            "compose.html",
+            {
+                "request": request,
+                "error": e.detail,
+                "compose_text": content,
+            },
+        )
 
     return RedirectResponse("/stacks/", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -549,11 +568,14 @@ async def stack_edit(
         # если не валидный YAML — отдадим как есть
         pass
 
-    return templates.TemplateResponse("compose.html", {
-        "request": request,
-        "compose_text": compose_text,
-        "stack_id": stack.stack_id,
-    })
+    return templates.TemplateResponse(
+        "compose.html",
+        {
+            "request": request,
+            "compose_text": compose_text,
+            "stack_id": stack.stack_id,
+        },
+    )
 
 
 @router.post("/{stack_id}/start")
@@ -586,7 +608,7 @@ async def ui_stack_stop(stack_id: str, user: User = Depends(get_current_user)):
 
 @router.get("/logs/{ctr_id}", response_class=HTMLResponse)
 async def ui_container_logs(
-        ctr_id: str, request: Request, user: User = Depends(get_current_user)
+    ctr_id: str, request: Request, user: User = Depends(get_current_user)
 ):
     await check_access(user)
     try:
@@ -606,7 +628,7 @@ async def ui_container_logs(
 
 @router.post("/{ctr_id}/start")
 async def ui_start(
-        ctr_id: str, request: Request, user: User = Depends(get_current_user)
+    ctr_id: str, request: Request, user: User = Depends(get_current_user)
 ):
     await check_access(user)
     try:
@@ -688,13 +710,14 @@ async def images_ui(request: Request, user: User = Depends(get_current_user)):
     new_gitea = request.session.pop("gitea_info", None)
 
     return templates.TemplateResponse(
-        "images.html", {
+        "images.html",
+        {
             "request": request,
             "user": user,
             "images": images,
             "GITEA_DOMAIN": os.getenv("GITEA_DOMAIN"),
             "new_gitea": new_gitea,
-        }
+        },
     )
 
 
@@ -703,8 +726,8 @@ GITEA_API_URL = os.getenv("GITEA_API_URL", "http://gitea:3000")
 
 @router.post("/images/gitea/create")
 async def create_gitea_user(
-        request: Request,
-        user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
     if user.gitea_login:
@@ -745,21 +768,22 @@ async def create_gitea_user(
             )
             if resp.status_code != 201:
                 raise HTTPException(
-                    500,
-                    f"Gitea create-user error: {resp.status_code} {resp.text}"
+                    500, f"Gitea create-user error: {resp.status_code} {resp.text}"
                 )
 
             # 3-б. Генерируем PAT (нужен Basic-Auth от лица созданного юзера)
             token_resp = await client.post(
                 f"/api/v1/users/{login}/tokens",
-                json={"name": "docker-registry",
-                      "scopes": ["packages:read", "packages:write"]},
+                json={
+                    "name": "docker-registry",
+                    "scopes": ["packages:read", "packages:write"],
+                },
                 auth=(login, password),  # BasicAuth
             )
             if token_resp.status_code != 201:
                 raise HTTPException(
                     500,
-                    f"Gitea token error: {token_resp.status_code} {token_resp.text}"
+                    f"Gitea token error: {token_resp.status_code} {token_resp.text}",
                 )
 
             token = token_resp.json().get("sha1")
@@ -769,7 +793,7 @@ async def create_gitea_user(
         raise HTTPException(
             500,
             "Cannot connect to Gitea API. "
-            "Проверьте, что api_base=http://gitea:3000 доступен из контейнера."
+            "Проверьте, что api_base=http://gitea:3000 доступен из контейнера.",
         )
 
     # ─── 4. Сохраняем логин и зашифрованный токен ─────────────────────────
@@ -790,9 +814,9 @@ async def create_gitea_user(
 
 @router.post("/images/{image_id}/remove")
 async def ui_remove_image(
-        image_id: str,
-        request: Request,
-        user: User = Depends(get_current_user),
+    image_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
@@ -894,8 +918,8 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
 
 @router.post("/databases/pgadmin/create")
 async def create_pgadmin_user(
-        request: Request,
-        user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
     if user.pgadmin_login:
@@ -919,7 +943,8 @@ async def create_pgadmin_user(
         "add-user",
         login,
         password,
-        "--role", "User",
+        "--role",
+        "User",
     ]
     try:
         result = pgc.exec_run(cmd, user="root")
@@ -948,9 +973,9 @@ async def create_pgadmin_user(
 
 @router.post("/databases/create", response_class=HTMLResponse)
 async def create_database(
-        request: Request,
-        name: str = Form(...),
-        user: User = Depends(get_current_user),
+    request: Request,
+    name: str = Form(...),
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
@@ -986,7 +1011,7 @@ async def create_database(
         )
 
         # 2) Создаём роль и базу
-        await conn.execute(f'CREATE USER "{db_user}" WITH PASSWORD \'{raw_password}\';')
+        await conn.execute(f"CREATE USER \"{db_user}\" WITH PASSWORD '{raw_password}';")
         await conn.execute(f'CREATE DATABASE "{db_name}" OWNER "{db_user}";')
 
         # 3) Отзываем PUBLIC-connect и даём только нашему юзеру
@@ -996,10 +1021,12 @@ async def create_database(
         # 4) Отзываем CONNECT на всех остальных базах для этой роли
         rows = await conn.fetch(
             "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <> $1;",
-            db_name
+            db_name,
         )
         for r in rows:
-            await conn.execute(f'REVOKE CONNECT ON DATABASE "{r["datname"]}" FROM "{db_user}";')
+            await conn.execute(
+                f'REVOKE CONNECT ON DATABASE "{r["datname"]}" FROM "{db_user}";'
+            )
 
         await conn.close()
 
@@ -1012,7 +1039,7 @@ async def create_database(
             port=int(os.getenv("PGDB_USER_PORT", 5432)),
         )
         # Отзываем все права PUBLIC на схему public
-        await db_conn.execute('REVOKE ALL ON SCHEMA public FROM PUBLIC;')
+        await db_conn.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC;")
         # Даём нашему пользователю CREATE и USAGE на public
         await db_conn.execute(f'GRANT CREATE, USAGE ON SCHEMA public TO "{db_user}";')
         await db_conn.close()
@@ -1046,9 +1073,9 @@ class RevealRequest(BaseModel):
 
 @router.post("/databases/{db_id}/reveal")
 async def reveal_database(
-        db_id: int,
-        request: Request,
-        user: User = Depends(get_current_user),
+    db_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
 
@@ -1075,9 +1102,9 @@ async def reveal_database(
 
 @router.post("/databases/{db_id}/delete")
 async def delete_database(
-        db_id: int,
-        request: Request,
-        user: User = Depends(get_current_user),
+    db_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
     db = await UserDatabase.get_or_none(id=db_id, owner=user)
@@ -1124,10 +1151,10 @@ async def dockerhub_auth_form(request: Request, user: User = Depends(get_current
 
 @router.post("/dockerhub")
 async def dockerhub_auth_submit(
-        request: Request,
-        username: str = Form(...),
-        token: str = Form(...),
-        user: User = Depends(get_current_user),
+    request: Request,
+    username: str = Form(...),
+    token: str = Form(...),
+    user: User = Depends(get_current_user),
 ):
     await check_access(user)
 

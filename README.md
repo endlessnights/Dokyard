@@ -8,7 +8,6 @@
 - 🐳 View, start, stop, and remove containers via the web UI
 - 🧱 Container stack grouping via `docker-compose` with YAML editing and redeploy support
 - 📦 Image management: view, delete, and check usage status
-- 📁 File browser for user-specific volume directories
 - 📜 View logs of running and stopped containers
 - ⏱ Display container uptime
 - 🌐 Docker Hub authentication via token with current session display
