@@ -1,7 +1,7 @@
 services:
   app:
 #    build: .
-    image: pycarrot2/dokyard:v1.0.0
+    image: pycarrot2/dokyard:v1.0.1
     container_name: dokyard_app
     ports:
       - '8000:8000'
