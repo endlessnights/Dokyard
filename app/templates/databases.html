@@ -70,7 +70,7 @@
   </div>
 </div>
 {% if user.pgadmin_login %}
-  <a href="http://localhost:5050/" target="_blank"
+  <a href="{{ db_url }}" target="_blank"
      class="inline-block bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">
      Open pgAdmin
   </a>

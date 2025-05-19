@@ -894,6 +894,7 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
     new_db = request.session.pop("new_db", None)
     db_error = request.session.pop("db_error", None)
     db_success = request.session.pop("db_success", None)
+    db_url = os.environ.get("db_url", "http://localhost:5050/")
     # Вот новая строка:
     pgadmin_info = request.session.pop("pgadmin_info", None)
 
@@ -911,6 +912,7 @@ async def databases_ui(request: Request, user: User = Depends(get_current_user))
             "db_success": db_success,
             "pgadmin_info": pgadmin_info,
             "count": count,
+            "db_url": db_url,
             "max": int(MAX_DB_PER_USER),
         },
     )
